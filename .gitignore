@@ -8,3 +8,9 @@ runtime/
 
 # Claude Code local settings
 .claude/
+
+# Qwen Code local settings
+.qwen/
+
+# Backup files
+*.bak
