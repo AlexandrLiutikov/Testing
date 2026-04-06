@@ -24,10 +24,11 @@
 | # | Файл | Что содержит |
 |---|---|---|
 | 1 | `AGENTS.md` | Философия, приоритеты, формат ответа |
-| 2 | `products/<Продукт>/RISK_MODEL.md` | Модель рисков продукта (для Editors → `products/Editors/RISK_MODEL.md`) |
-| 3 | `DECISION_ENGINE.md` | Алгоритм принятия решения о релизе (общий, в корне проекта) |
-| 4 | `SCRIPT_RULES.md` | Правила написания Python-скриптов |
-| 5 | `REPORT_STYLE_RULES.md` | Стандарт оформления HTML/MD/JSON отчётов |
+| 2 | `GIT_DISCIPLINE.md` | Обязательный регламент работы с Git |
+| 3 | `products/<Продукт>/RISK_MODEL.md` | Модель рисков продукта (для Editors → `products/Editors/RISK_MODEL.md`) |
+| 4 | `DECISION_ENGINE.md` | Алгоритм принятия решения о релизе (общий, в корне проекта) |
+| 5 | `SCRIPT_RULES.md` | Правила написания Python-скриптов |
+| 6 | `REPORT_STYLE_RULES.md` | Стандарт оформления HTML/MD/JSON отчётов |
 
 **Если какой-то файл недоступен** — останови работу, сообщи пользователю, предложи восстановить.
 
@@ -35,10 +36,11 @@
 
 1. Явное указание пользователя
 2. `AGENTS.md`
-3. `<Продукт>/<ПРОДУКТ>_RISK_MODEL.md`
-4. `DECISION_ENGINE.md`
-5. `SCRIPT_RULES.md`
-6. `REPORT_STYLE_RULES.md`
+3. `GIT_DISCIPLINE.md`
+4. `<Продукт>/<ПРОДУКТ>_RISK_MODEL.md`
+5. `DECISION_ENGINE.md`
+6. `SCRIPT_RULES.md`
+7. `REPORT_STYLE_RULES.md`
 
 ---
 

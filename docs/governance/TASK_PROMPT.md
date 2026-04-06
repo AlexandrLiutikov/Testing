@@ -21,10 +21,11 @@ STEP 1 — READ DOCUMENTATION (ОБЯЗАТЕЛЬНО)
 Прочитай и проанализируй:
 
 1. AGENTS.md
-2. <Продукт>/<ПРОДУКТ>_RISK_MODEL.md
-3. DECISION_ENGINE.md
-4. SCRIPT_RULES.md
-5. REPORT_STYLE_RULES.md
+2. GIT_DISCIPLINE.md
+3. <Продукт>/<ПРОДУКТ>_RISK_MODEL.md
+4. DECISION_ENGINE.md
+5. SCRIPT_RULES.md
+6. REPORT_STYLE_RULES.md
 
 Если хотя бы один файл отсутствует:
 → остановись
