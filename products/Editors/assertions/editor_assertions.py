@@ -46,23 +46,32 @@ def assert_popup_closed(
 def assert_tab_active(
     screenshot_path: str,
     tab_name: str,
-    extra_tokens: List[str] = None,
+    content_tokens: List[str] = None,
     need: int = 1,
 ) -> Tuple[bool, List[str]]:
     """Проверить, что вкладка панели инструментов активна.
 
-    Делает скриншот и ищет OCR-токены: имя вкладки + дополнительные
-    токены содержимого панели (для подтверждения что панель сменилась).
+    ВАЖНО: имя вкладки НЕ используется как токен для проверки, потому что
+    все имена вкладок всегда видны в строке ленты (даже неактивные).
+    Проверка выполняется по content_tokens — уникальному содержимому панели
+    инструментов данной вкладки (кнопки, подписи, элементы).
+
+    Args:
+        screenshot_path: путь для сохранения скриншота
+        tab_name: имя вкладки (для логирования, НЕ для проверки)
+        content_tokens: токены уникального содержимого панели вкладки
+        need: минимальное количество найденных токенов для PASS
 
     Returns:
         (ok, found_tokens)
     """
-    tokens = [tab_name]
-    if extra_tokens:
-        tokens.extend(extra_tokens)
+    if not content_tokens:
+        # Без content_tokens невозможно достоверно проверить активность
+        take_screenshot(screenshot_path)
+        return False, []
     take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
-    return has_tokens(ocr_text, tokens, need)
+    return has_tokens(ocr_text, content_tokens, need)
 
 
 def assert_document_created(
