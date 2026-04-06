@@ -1,175 +1,79 @@
-"""Базовый (абстрактный) интерфейс Platform Driver Layer."""
+"""Базовый (абстрактный) интерфейс Platform Driver Layer.
 
-import platform
-import subprocess
-import time
+Определяет контракт, которую обязан реализовать каждый платформенный
+адаптер (windows.py, linux.py, macos.py).  Тесты работают только с этим
+интерфейсом и не знают о конкретной ОС.
+"""
+
+from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
 
-def _is_windows():
-    return platform.system() == "Windows"
+class BaseDriver(ABC):
+    """Единый контракт драйвера для взаимодействия с ОС и UI."""
 
+    # ------------------------------------------------------------------
+    # Window management
+    # ------------------------------------------------------------------
 
-def _is_linux():
-    return platform.system() == "Linux"
+    @abstractmethod
+    def activate_window(self, pid: int) -> None:
+        """Активировать окно процесса *pid* и передать ему фокус."""
+        ...
 
+    # ------------------------------------------------------------------
+    # Input simulation
+    # ------------------------------------------------------------------
 
-def _is_macos():
-    return platform.system() == "Darwin"
+    @abstractmethod
+    def click_rel(self, pid: int, rel_x: float, rel_y: float) -> None:
+        """Кликнуть по относительной позиции внутри окна процесса *pid*.
 
+        *rel_x* и *rel_y* — доли от 0.0 до 1.0 (левый-верхний угол →
+        правый-нижний).
+        """
+        ...
 
-def activate_window(pid: int):
-    if _is_windows():
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             f"(New-Object -ComObject WScript.Shell).AppActivate({pid})"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-    elif _is_linux():
-        subprocess.run(
-            ["xdotool", "search", "--pid", str(pid), "--onlyvisible",
-             "--limit", "1", "windowactivate"],
-            stderr=subprocess.DEVNULL,
-        )
-    time.sleep(0.5)  # ожидание активации окна (Platform Driver Layer)
+    @abstractmethod
+    def send_escape(self, pid: int) -> None:
+        """Эмулировать нажатие клавиши Escape в окне процесса *pid*."""
+        ...
 
+    # ------------------------------------------------------------------
+    # Window geometry (нужен для координатных кликов)
+    # ------------------------------------------------------------------
 
-def _get_hwnd_from_pid(pid: int) -> Optional[int]:
-    if not _is_windows():
-        return None
-    ps = (
-        f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue).MainWindowHandle"
-    )
-    r = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps],
-        capture_output=True, text=True,
-    )
-    val = r.stdout.strip()
-    try:
-        hwnd = int(val)
-        if hwnd != 0:
-            return hwnd
-    except (ValueError, TypeError):
-        pass
-    return None
+    @abstractmethod
+    def get_window_rect(self, pid: int) -> Optional[Tuple[int, int, int, int]]:
+        """Вернуть координаты окна ``(left, top, right, bottom)`` или ``None``."""
+        ...
 
+    # ------------------------------------------------------------------
+    # Modal / warning detection (может быть не реализован на некоторых ОС)
+    # ------------------------------------------------------------------
 
-def _get_window_rect(hwnd: int) -> Optional[Tuple[int, int, int, int]]:
-    import ctypes
+    def detect_warning(self, pid: int, timeout_sec: int = 10) -> bool:
+        """Проверить наличие модального предупреждения у процесса *pid*."""
+        # По умолчанию — не поддерживается; платформа может переопределить.
+        return False
 
-    class RECT(ctypes.Structure):
-        _fields_ = [
-            ("left", ctypes.c_long), ("top", ctypes.c_long),
-            ("right", ctypes.c_long), ("bottom", ctypes.c_long),
-        ]
+    def dismiss_warning(self, pid: int) -> bool:
+        """Закрыть предупреждение (кнопка OK / Enter fallback)."""
+        return False
 
-    rect = RECT()
-    ok = ctypes.windll.user32.GetWindowRect(
-        ctypes.c_void_p(hwnd), ctypes.byref(rect)
-    )
-    if ok:
-        return (rect.left, rect.top, rect.right, rect.bottom)
-    return None
+    # ------------------------------------------------------------------
+    # Process management (тонкая обёртка; может быть общей)
+    # ------------------------------------------------------------------
 
+    @staticmethod
+    def kill_editors() -> None:
+        """Завершить все процессы editors/editors_helper.
 
-def click_rel(pid: int, rel_x: float, rel_y: float):
-    """Клик по относительной позиции в окне (координатный fallback).
+        Статический метод — общая утилита, не требует экземпляра.
+        """
+        raise NotImplementedError
 
-    R7 Office использует пользовательскую отрисовку UI (CEF),
-    стандартные элементы Accessibility API недоступны для пунктов
-    левого меню стартового экрана.
-    """
-    if _is_windows():
-        import ctypes
-
-        hwnd = _get_hwnd_from_pid(pid)
-        if not hwnd:
-            return
-        rect = _get_window_rect(hwnd)
-        if not rect:
-            return
-        left, top, right, bottom = rect
-
-        px = int(left + (right - left) * rel_x)
-        py = int(top + (bottom - top) * rel_y)
-
-        ctypes.windll.user32.SetCursorPos(px, py)
-        time.sleep(0.08)
-        ctypes.windll.user32.mouse_event(
-            ctypes.c_ulong(0x0002), ctypes.c_ulong(0),
-            ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_size_t(0),
-        )
-        ctypes.windll.user32.mouse_event(
-            ctypes.c_ulong(0x0004), ctypes.c_ulong(0),
-            ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_size_t(0),
-        )
-        time.sleep(0.5)
-
-    elif _is_linux():
-        try:
-            r = subprocess.run(
-                ["xdotool", "getactivewindow", "getwindowgeometry", "--shell"],
-                capture_output=True, text=True,
-            )
-            geom = {}
-            for line in r.stdout.splitlines():
-                k, _, v = line.partition("=")
-                if v.isdigit():
-                    geom[k] = int(v)
-            x_pos = geom.get("X", 0) + int(geom.get("WIDTH", 0) * rel_x)
-            y_pos = geom.get("Y", 0) + int(geom.get("HEIGHT", 0) * rel_y)
-            subprocess.run(
-                ["xdotool", "mousemove", str(x_pos), str(y_pos)],
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(0.08)
-            subprocess.run(["xdotool", "click", "1"], stderr=subprocess.DEVNULL)
-            time.sleep(0.5)
-        except Exception:
-            pass
-
-    elif _is_macos():
-        try:
-            script = (
-                'tell application "System Events"\n'
-                '  set frontApp to first application process whose frontmost is true\n'
-                '  set win to first window of frontApp\n'
-                '  set {x, y} to position of win\n'
-                '  set {w, h} to size of win\n'
-                '  return (x as text) & " " & (y as text) & " " & (w as text) & " " & (h as text)\n'
-                'end tell'
-            )
-            r = subprocess.run(
-                ["osascript", "-e", script], capture_output=True, text=True,
-            )
-            parts = r.stdout.strip().split()
-            if len(parts) == 4:
-                wx, wy, ww, wh = (int(p) for p in parts)
-                px = wx + int(ww * rel_x)
-                py = wy + int(wh * rel_y)
-                subprocess.run(
-                    ["cliclick", f"c:{px},{py}"], stderr=subprocess.DEVNULL,
-                )
-                time.sleep(0.5)
-        except Exception:
-            pass
-
-
-def send_escape(pid: int):
-    activate_window(pid)
-    if _is_windows():
-        import ctypes
-        VK_ESCAPE = 0x1B
-        KEYEVENTF_KEYUP = 0x0002
-        ctypes.windll.user32.keybd_event(VK_ESCAPE, 0, 0, 0)
-        time.sleep(0.05)
-        ctypes.windll.user32.keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0)
-    elif _is_linux():
-        subprocess.run(["xdotool", "key", "Escape"], stderr=subprocess.DEVNULL)
-    elif _is_macos():
-        subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to key code 53'],
-            stderr=subprocess.DEVNULL,
-        )
-    time.sleep(1)  # ожидание обработки нажатия (Platform Driver Layer)
+    @staticmethod
+    def launch_editor(editor_path: str) -> None:
+        """Запустить редактор по указанному пути."""
+        raise NotImplementedError

@@ -19,7 +19,7 @@ if _PROJECT_DIR not in sys.path:
 from shared.infra.test_runner import CaseRunner
 from shared.infra.screenshots import take_screenshot
 from shared.infra.waits import wait_main_proc
-from shared.drivers.base import activate_window
+from shared.drivers import get_driver
 
 from products.Editors.actions.editor_actions import (
     kill_editors,
@@ -87,7 +87,8 @@ def main():
             )
             raise RuntimeError("Окно редактора не найдено после запуска")
 
-        activate_window(pid)
+        driver = get_driver()
+        driver.activate_window(pid)
 
         warn_found = detect_warning_window(pid, timeout_sec=10)
         take_screenshot(s1_path)
@@ -126,7 +127,7 @@ def main():
         warning_still = pid_after and detect_warning_window(pid_after, timeout_sec=3)
 
         if pid_after:
-            activate_window(pid_after)
+            driver.activate_window(pid_after)
         take_screenshot(s2_path)
         dur2 = int((datetime.now() - t0).total_seconds() * 1000)
 
