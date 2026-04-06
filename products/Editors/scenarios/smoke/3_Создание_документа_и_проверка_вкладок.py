@@ -71,8 +71,8 @@ def _step(step_num, step_name, status, expected, actual, screenshot,
     }
     if status == "FAIL":
         result["failure_type"] = failure_type or "TEST_FAIL"
-        result["failure_severity"] = failure_severity or "MEDIUM"
-        result["failure_area"] = failure_area or "UI_LAYOUT"
+        result["failure_severity"] = failure_severity or "HIGH"
+        result["failure_area"] = failure_area or "CORE_FUNCTION"
         result["failure_detail"] = failure_detail or actual
     elif status == "BLOCKED":
         result["failure_type"] = "BLOCKED"
@@ -102,9 +102,9 @@ def _do_tab_step(pid, step_num, tab_name, expected, shot_path,
     return _step(step_num, f"Клик по вкладке «{tab_name}»", "FAIL",
                  expected,
                  f"Вкладка «{tab_name}» не подтверждена на экране после клика",
-                 shot_path, failure_severity="MEDIUM",
-                 failure_area="UI_LAYOUT",
-                 failure_detail=f"Вкладка «{tab_name}» не подтверждена после перехода",
+                 shot_path, failure_severity="HIGH",
+                 failure_area="CORE_FUNCTION",
+                 failure_detail=f"Вкладка «{tab_name}» не отображается — базовая функция недоступна",
                  duration_ms=dur)
 
 
