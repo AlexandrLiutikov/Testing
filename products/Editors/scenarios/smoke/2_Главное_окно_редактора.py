@@ -1,31 +1,37 @@
+# -*- coding: utf-8 -*-
 """
-Автотест: Главное окно редактора — навигация по разделам стартового экрана.
-Кейс 2 — Главное окно редактора (smoke).
+Кейс 2 — Главное окно редактора: навигация по разделам стартового экрана.
 
 Предусловие: редактор уже запущен (кейс 1 выполнен).
 Постусловие: редактор остаётся открытым для кейса 3.
 
-Каждый шаг разрезан на пары: действие → подтверждающая проверка.
+Каждый шаг: действие (action) → подтверждающая проверка (assertion).
+Вся инфраструктура — через reusable-слой (StepVerifier, capture_step).
 """
 
 import argparse
 import os
 import sys
-from datetime import datetime
 
 # --- Корень проекта в sys.path для импортов shared/ ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PRODUCT_DIR = os.path.dirname(os.path.dirname(_SCRIPT_DIR))
-if _PROJECT_DIR not in sys.path:
-    sys.path.insert(0, _PROJECT_DIR)
+_SCENARIOS_DIR = os.path.dirname(_SCRIPT_DIR)
+_PRODUCT_DIR = os.path.dirname(_SCENARIOS_DIR)
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
+sys.path.insert(0, _PROJECT_ROOT)
 
-from shared.infra.test_runner import CaseRunner
-from shared.infra.screenshots import take_screenshot
+# === Reuseable инфраструктура ===
+from shared.infra import CaseRunner, StepVerifier, capture_step
 from shared.infra.waits import wait_main_proc
-from shared.infra.ocr import ocr_image, has_tokens
 from shared.drivers import get_driver
 
-from products.Editors.actions.editor_actions import click_menu, dismiss_collab_popup
+# === Продуктовый слой: actions ===
+from products.Editors.actions.editor_actions import (
+    click_menu,
+    dismiss_collab_popup,
+)
+
+# === Продуктовый слой: assertions ===
 from products.Editors.assertions.editor_assertions import (
     assert_section_visible,
     assert_popup_visible,
@@ -65,12 +71,11 @@ def main():
         driver = get_driver()
 
         # ==============================================================
-        # Предусловие: редактор уже открыт (кейс 1)
+        # Предусловие: редактор уже открыт (после кейса 1)
         # ==============================================================
         pid = wait_main_proc("editors", 20)
         if not pid:
-            err_shot = os.path.join(runner.run_dir, "00_no_editor.png")
-            take_screenshot(err_shot)
+            err_shot = capture_step(runner.run_dir, 0, "no_editor")
             runner.add_step(
                 step_num=0, step_name="Предусловие: редактор открыт",
                 status="FAIL",
@@ -91,281 +96,217 @@ def main():
         # ==============================================================
         # Шаг 1: Проверка — главное окно отображается (assertion only)
         # ==============================================================
-        t0 = datetime.now()
-        s1_path = os.path.join(runner.run_dir, "01_home.png")
+        s1_path = capture_step(runner.run_dir, 1, "home",
+                               activate_driver=driver, pid=pid)
         ok, _ = assert_section_visible(
             s1_path,
-            ["Создавайте новые файлы", "Документ", "Табблица", "Презентация"],
+            ["Создавайте новые файлы", "Документ", "Таблица", "Презентация"],
             need=2,
         )
-        dur1 = int((datetime.now() - t0).total_seconds() * 1000)
-        if ok:
-            runner.add_step(
-                step_num=1, step_name="Проверка: главное окно — «Главная» видна",
-                status="PASS",
-                expected="Отображается вкладка меню «Главная»",
-                actual="Главное окно редактора открыто, отображается стартовый экран",
-                screenshot=s1_path, duration_ms=dur1,
-            )
-        else:
-            runner.add_step(
-                step_num=1, step_name="Проверка: главное окно — «Главная» видна",
-                status="FAIL",
-                expected="Отображается вкладка меню «Главная»",
-                actual="Стартовый экран не подтверждён по OCR-токенам",
-                screenshot=s1_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Токены «Главная» не обнаружены на стартовом экране",
-                duration_ms=dur1,
+
+        with StepVerifier(
+            runner, step_num=1,
+            step_name="Проверка: главное окно — «Главная» видна",
+            expected="Отображается вкладка меню «Главная»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s1_path)
+            step.check(
+                condition=ok,
+                pass_msg="Главное окно редактора открыто, отображается стартовый экран",
+                fail_msg="Токены «Главная» не обнаружены на стартовом экране",
             )
 
         # ==============================================================
-        # Шаг 2: Клик «Шаблоны» (action)
+        # Шаг 2: Клик «Шаблоны» → проверка что раздел открыт
         # ==============================================================
         click_menu(pid, "templates")
 
-        # Шаг 2: Проверка — раздел «Шаблоны» открыт (assertion)
-        t0 = datetime.now()
-        s2_path = os.path.join(runner.run_dir, "02_templates.png")
+        s2_path = capture_step(runner.run_dir, 2, "templates",
+                               activate_driver=driver, pid=pid)
         ok, _ = assert_section_visible(
             s2_path,
             ["Шаблоны документов", "Избранное", "Подключить папку"],
             need=1,
         )
-        dur2 = int((datetime.now() - t0).total_seconds() * 1000)
-        if ok:
-            runner.add_step(
-                step_num=2, step_name="Проверка: раздел «Шаблоны» открыт",
-                status="PASS",
-                expected="Отображается меню «Шаблоны»",
-                actual="Раздел «Шаблоны» открыт и отображается корректно",
-                screenshot=s2_path, duration_ms=dur2,
-            )
-        else:
-            runner.add_step(
-                step_num=2, step_name="Проверка: раздел «Шаблоны» открыт",
-                status="FAIL",
-                expected="Отображается меню «Шаблоны»",
-                actual="Раздел «Шаблоны» не подтверждён на экране после клика",
-                screenshot=s2_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Токены «Шаблоны» не обнаружены после перехода",
-                duration_ms=dur2,
+
+        with StepVerifier(
+            runner, step_num=2,
+            step_name="Проверка: раздел «Шаблоны» открыт",
+            expected="Отображается меню «Шаблоны»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s2_path)
+            step.check(
+                condition=ok,
+                pass_msg="Раздел «Шаблоны» открыт и отображается корректно",
+                fail_msg="Раздел «Шаблоны» не подтверждён на экране после клика",
             )
 
         # ==============================================================
-        # Шаг 3: Клик «Локальные файлы» (action)
+        # Шаг 3: Клик «Локальные файлы» → проверка что раздел открыт
         # ==============================================================
         click_menu(pid, "local")
 
-        # Шаг 3: Проверка — раздел «Локальные файлы» открыт (assertion)
-        t0 = datetime.now()
-        s3_path = os.path.join(runner.run_dir, "03_local.png")
+        s3_path = capture_step(runner.run_dir, 3, "local",
+                               activate_driver=driver, pid=pid)
         ok, _ = assert_section_visible(
             s3_path,
             ["Локальные файлы", "Выбрать папку", "Подключить папку"],
             need=1,
         )
-        dur3 = int((datetime.now() - t0).total_seconds() * 1000)
-        if ok:
-            runner.add_step(
-                step_num=3, step_name="Проверка: раздел «Локальные файлы» открыт",
-                status="PASS",
-                expected="Отображается меню «Локальные файлы»",
-                actual="Раздел «Локальные файлы» открыт и отображается корректно",
-                screenshot=s3_path, duration_ms=dur3,
-            )
-        else:
-            runner.add_step(
-                step_num=3, step_name="Проверка: раздел «Локальные файлы» открыт",
-                status="FAIL",
-                expected="Отображается меню «Локальные файлы»",
-                actual="Раздел «Локальные файлы» не подтверждён на экране после клика",
-                screenshot=s3_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Токены «Локальные файлы» не обнаружены после перехода",
-                duration_ms=dur3,
+
+        with StepVerifier(
+            runner, step_num=3,
+            step_name="Проверка: раздел «Локальные файлы» открыт",
+            expected="Отображается меню «Локальные файлы»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s3_path)
+            step.check(
+                condition=ok,
+                pass_msg="Раздел «Локальные файлы» открыт и отображается корректно",
+                fail_msg="Раздел «Локальные файлы» не подтверждён на экране после клика",
             )
 
         # ==============================================================
-        # Шаг 4: Клик «Совместная работа» (action)
+        # Шаг 4: Клик «Совместная работа» → проверка модального окна
         # ==============================================================
         click_menu(pid, "collab")
 
-        # Шаг 4: Проверка — окно подключения появилось (assertion)
-        t0 = datetime.now()
-        s4_path = os.path.join(runner.run_dir, "04_collab_popup.png")
+        s4_path = capture_step(runner.run_dir, 4, "collab_popup",
+                               activate_driver=driver, pid=pid)
         popup_ok, _ = assert_popup_visible(
             s4_path,
             ["Выберите диск для подключения", "URL диска",
              "Подключить", "Р7-Диск", "VK WorkSpace"],
             need=2,
         )
-        dur4 = int((datetime.now() - t0).total_seconds() * 1000)
-        if popup_ok:
-            runner.add_step(
-                step_num=4, step_name="Проверка: окно подключения появилось",
-                status="PASS",
-                expected="Появляется окно «Выберите диск для подключения»",
-                actual="Модальное окно подключения диска появилось",
-                screenshot=s4_path, duration_ms=dur4,
-            )
-        else:
-            runner.add_step(
-                step_num=4, step_name="Проверка: окно подключения появилось",
-                status="FAIL",
-                expected="Появляется окно «Выберите диск для подключения»",
-                actual="Модальное окно подключения не обнаружено",
-                screenshot=s4_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Модальное окно «Выберите диск для подключения» "
-                               "не появилось после клика по «Совместная работа»",
-                duration_ms=dur4,
+
+        with StepVerifier(
+            runner, step_num=4,
+            step_name="Проверка: окно подключения появилось",
+            expected="Появляется окно «Выберите диск для подключения»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s4_path)
+            step.check(
+                condition=popup_ok,
+                pass_msg="Модальное окно подключения диска появилось",
+                fail_msg="Модальное окно подключения не обнаружено",
             )
 
         # ==============================================================
-        # Шаг 5: Закрытие модального окна кнопкой «X» (action)
+        # Шаг 5: Закрытие модального окна → проверка что закрыто
         # ==============================================================
         dismiss_collab_popup(pid)
 
-        # Шаг 5: Проверка — окно подключения закрыто (assertion)
-        t0 = datetime.now()
-        s5_path = os.path.join(runner.run_dir, "05_after_popup_close.png")
+        s5_path = capture_step(runner.run_dir, 5, "after_popup_close",
+                               activate_driver=driver, pid=pid)
         popup_closed = assert_popup_closed(
             s5_path,
             ["Выберите диск для подключения", "URL диска", "Подключить"],
         )
-        dur5 = int((datetime.now() - t0).total_seconds() * 1000)
-        if popup_closed:
-            runner.add_step(
-                step_num=5, step_name="Проверка: окно подключения закрыто",
-                status="PASS",
-                expected="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
-                actual="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
-                screenshot=s5_path, duration_ms=dur5,
-            )
-        else:
-            runner.add_step(
-                step_num=5, step_name="Проверка: окно подключения закрыто",
-                status="FAIL",
-                expected="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
-                actual="Всплывающее окно осталось открытым после нажатия кнопки «X»",
-                screenshot=s5_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Модальное окно подключения не закрылось по кнопке «X»",
-                duration_ms=dur5,
+
+        with StepVerifier(
+            runner, step_num=5,
+            step_name="Проверка: окно подключения закрыто",
+            expected="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s5_path)
+            step.check(
+                condition=popup_closed,
+                pass_msg="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
+                fail_msg="Модальное окно подключения не закрылось по кнопке «X»",
             )
 
         # ==============================================================
-        # Шаг 6: Клик «Настройки» (action)
+        # Шаг 6: Клик «Настройки» → проверка что раздел открыт
         # ==============================================================
         click_menu(pid, "settings")
 
-        # Шаг 6: Проверка — раздел «Настройки» открыт (assertion)
-        t0 = datetime.now()
-        s6_path = os.path.join(runner.run_dir, "06_settings.png")
+        s6_path = capture_step(runner.run_dir, 6, "settings",
+                               activate_driver=driver, pid=pid)
         ok, _ = assert_section_visible(
             s6_path,
             ["Настройки", "Язык интерфейса", "Масштабирование интерфейса"],
             need=2,
         )
-        dur6 = int((datetime.now() - t0).total_seconds() * 1000)
-        if ok:
-            runner.add_step(
-                step_num=6, step_name="Проверка: раздел «Настройки» открыт",
-                status="PASS",
-                expected="Отображается вкладка меню «Настройки»",
-                actual="Раздел «Настройки» открыт и отображается корректно",
-                screenshot=s6_path, duration_ms=dur6,
-            )
-        else:
-            runner.add_step(
-                step_num=6, step_name="Проверка: раздел «Настройки» открыт",
-                status="FAIL",
-                expected="Отображается вкладка меню «Настройки»",
-                actual="Раздел «Настройки» не подтверждён на экране после клика",
-                screenshot=s6_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Токены «Настройки» не обнаружены после перехода",
-                duration_ms=dur6,
+
+        with StepVerifier(
+            runner, step_num=6,
+            step_name="Проверка: раздел «Настройки» открыт",
+            expected="Отображается вкладка меню «Настройки»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s6_path)
+            step.check(
+                condition=ok,
+                pass_msg="Раздел «Настройки» открыт и отображается корректно",
+                fail_msg="Раздел «Настройки» не подтверждён на экране после клика",
             )
 
         # ==============================================================
-        # Шаг 7: Клик «О программе» (action)
+        # Шаг 7: Клик «О программе» → проверка что раздел открыт
         # ==============================================================
         click_menu(pid, "about")
 
-        # Шаг 7: Проверка — раздел «О программе» открыт (assertion)
-        t0 = datetime.now()
-        s7_path = os.path.join(runner.run_dir, "07_about.png")
+        s7_path = capture_step(runner.run_dir, 7, "about",
+                               activate_driver=driver, pid=pid)
         ok, _ = assert_section_visible(
             s7_path,
             ["Профессиональный (десктопная версия)",
              "Лицензионное соглашение", "Техподдержка"],
             need=1,
         )
-        dur7 = int((datetime.now() - t0).total_seconds() * 1000)
-        if ok:
-            runner.add_step(
-                step_num=7, step_name="Проверка: раздел «О программе» открыт",
-                status="PASS",
-                expected="Отображается меню «О программе»",
-                actual="Раздел «О программе» открыт и отображается корректно",
-                screenshot=s7_path, duration_ms=dur7,
-            )
-        else:
-            runner.add_step(
-                step_num=7, step_name="Проверка: раздел «О программе» открыт",
-                status="FAIL",
-                expected="Отображается меню «О программе»",
-                actual="Раздел «О программе» не подтверждён на экране после клика",
-                screenshot=s7_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Токены «О программе» не обнаружены после перехода",
-                duration_ms=dur7,
+
+        with StepVerifier(
+            runner, step_num=7,
+            step_name="Проверка: раздел «О программе» открыт",
+            expected="Отображается меню «О программе»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s7_path)
+            step.check(
+                condition=ok,
+                pass_msg="Раздел «О программе» открыт и отображается корректно",
+                fail_msg="Раздел «О программе» не подтверждён на экране после клика",
             )
 
         # ==============================================================
-        # Шаг 8: Клик «Главная» (action)
+        # Шаг 8: Клик «Главная» → проверка возврата на стартовый экран
         # ==============================================================
         click_menu(pid, "home")
 
-        # Шаг 8: Проверка — возврат на «Главная» (assertion)
-        t0 = datetime.now()
-        s8_path = os.path.join(runner.run_dir, "08_home_return.png")
+        s8_path = capture_step(runner.run_dir, 8, "home_return",
+                               activate_driver=driver, pid=pid)
         ok, _ = assert_section_visible(
             s8_path,
             ["Самое время начать", "Создавайте новые файлы",
-             "Документ", "Табблица", "Презентация"],
+             "Документ", "Таблица", "Презентация"],
             need=2,
         )
-        dur8 = int((datetime.now() - t0).total_seconds() * 1000)
-        if ok:
-            runner.add_step(
-                step_num=8, step_name="Проверка: возврат на «Главная»",
-                status="PASS",
-                expected="Отображается вкладка меню «Главная»",
-                actual="Возврат на «Главная» выполнен, стартовый экран отображается",
-                screenshot=s8_path, duration_ms=dur8,
-            )
-        else:
-            runner.add_step(
-                step_num=8, step_name="Проверка: возврат на «Главная»",
-                status="FAIL",
-                expected="Отображается вкладка меню «Главная»",
-                actual="Возврат на «Главная» не подтверждён по OCR-токенам",
-                screenshot=s8_path,
-                failure_severity="MEDIUM",
-                failure_area="UI_LAYOUT",
-                failure_detail="Токены «Главная» не обнаружены после возврата",
-                duration_ms=dur8,
+
+        with StepVerifier(
+            runner, step_num=8,
+            step_name="Проверка: возврат на «Главная»",
+            expected="Отображается вкладка меню «Главная»",
+            severity="MEDIUM",
+            failure_area="UI_LAYOUT",
+        ) as step:
+            step.screenshot(s8_path)
+            step.check(
+                condition=ok,
+                pass_msg="Возврат на «Главная» выполнен, стартовый экран отображается",
+                fail_msg="Возврат на «Главная» не подтверждён по OCR-токенам",
             )
 
 
