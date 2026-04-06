@@ -5,24 +5,24 @@ import time
 from shared.drivers import get_driver
 
 
-MENU_POINTS = {
-    "home":      (0.07, 0.175),
-    "templates": (0.07, 0.245),
-    "local":     (0.07, 0.305),
-    "collab":    (0.07, 0.385),
-    "settings":  (0.07, 0.865),
-    "about":     (0.07, 0.925),
-}
-
-
 def click_menu(pid: int, menu_key: str):
-    """Активировать окно и кликнуть по пункту левого меню стартового экрана."""
-    if menu_key not in MENU_POINTS:
-        raise ValueError(f"Неизвестный пункт меню: {menu_key}")
+    """Активировать окно и кликнуть по пункту левого меню стартового экрана.
+    
+    Основной путь: семантический поиск элемента через driver.click_menu_item().
+    Fallback цепочка внутри driver: accessibility → OCR → coordinates → CV.
+    """
     driver = get_driver()
     driver.activate_window(pid)
-    rel_x, rel_y = MENU_POINTS[menu_key]
-    driver.click_rel(pid, rel_x, rel_y)
+    
+    # Семантический клик с fallback цепочкой внутри driver
+    success = driver.click_menu_item(pid, menu_key)
+    
+    if not success:
+        raise RuntimeError(
+            f"Не удалось кликнуть по пункту меню '{menu_key}': "
+            f"все fallback методы исчерпаны"
+        )
+    
     time.sleep(0.6)  # ожидание перехода (Semantic Actions Layer)
 
 
