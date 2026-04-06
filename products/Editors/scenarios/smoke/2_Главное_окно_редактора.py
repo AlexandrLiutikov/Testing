@@ -20,7 +20,7 @@ from shared.infra.test_runner import CaseRunner
 from shared.infra.screenshots import take_screenshot
 from shared.infra.waits import wait_main_proc
 from shared.infra.ocr import ocr_image, has_tokens
-from shared.drivers.base import activate_window
+from shared.drivers import get_driver
 
 from products.Editors.actions.editor_actions import click_menu, dismiss_collab_popup
 from products.Editors.assertions.editor_assertions import (
@@ -117,7 +117,8 @@ def main():
                 "Сначала выполните 1_Запуск_редактора.py."
             )
 
-        activate_window(pid)
+        driver = get_driver()
+        driver.activate_window(pid)
 
         # ==============================================================
         # Шаг 1: Открыто главное окно — отображается «Главная»
