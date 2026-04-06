@@ -19,6 +19,29 @@ MENU_POINTS = {
 # Координата кнопки «X» на модальном окне подключения дисков (по центру-вправо)
 COLLAB_CLOSE_X = (0.64, 0.26)
 
+# Кнопки создания документов на стартовом экране (относительные координаты)
+DOC_CREATE_BUTTONS = {
+    "document":      (0.40, 0.50),
+    "spreadsheet":   (0.53, 0.50),
+    "presentation":  (0.66, 0.50),
+}
+
+# Вкладки панели инструментов внутри редактора документов (относительные координаты)
+# R7 Office использует CEF для отрисовки UI — Accessibility API недоступен
+# для вкладок панели инструментов, поэтому используется координатный fallback.
+TOOLBAR_TABS = {
+    "Файл":                (0.025, 0.03),
+    "Главная":             (0.075, 0.03),
+    "Вставка":             (0.135, 0.03),
+    "Рисование":           (0.20, 0.03),
+    "Макет":               (0.265, 0.03),
+    "Ссылки":              (0.32, 0.03),
+    "Совместная работа":   (0.41, 0.03),
+    "Защита":              (0.50, 0.03),
+    "Вид":                 (0.545, 0.03),
+    "Плагины":             (0.605, 0.03),
+}
+
 
 def click_menu(pid: int, menu_key: str):
     """Активировать окно и кликнуть по пункту левого меню стартового экрана."""
@@ -33,6 +56,30 @@ def click_menu(pid: int, menu_key: str):
 def dismiss_collab_popup(pid: int):
     """Закрыть модальное окно подключения дисков клавишей Esc."""
     send_escape(pid)
+
+
+def create_document(pid: int, doc_type: str = "document"):
+    """Кликнуть по кнопке создания документа на стартовом экране.
+
+    doc_type: "document" | "spreadsheet" | "presentation"
+    """
+    if doc_type not in DOC_CREATE_BUTTONS:
+        raise ValueError(f"Неизвестный тип документа: {doc_type}")
+    activate_window(pid)
+    rel_x, rel_y = DOC_CREATE_BUTTONS[doc_type]
+    click_rel(pid, rel_x, rel_y)
+
+
+def click_toolbar_tab(pid: int, tab_name: str):
+    """Кликнуть по вкладке на панели инструментов редактора.
+
+    tab_name: одно из значений в TOOLBAR_TABS (например, "Главная", "Вставка").
+    """
+    if tab_name not in TOOLBAR_TABS:
+        raise ValueError(f"Неизвестная вкладка: {tab_name}")
+    activate_window(pid)
+    rel_x, rel_y = TOOLBAR_TABS[tab_name]
+    click_rel(pid, rel_x, rel_y)
 
 
 # ---------------------------------------------------------------------------

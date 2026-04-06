@@ -41,3 +41,41 @@ def assert_popup_closed(
     ocr_text = ocr_image(screenshot_path)
     still_open, _ = has_tokens(ocr_text, popup_tokens, need=1)
     return not still_open
+
+
+def assert_tab_active(
+    screenshot_path: str,
+    tab_name: str,
+    extra_tokens: List[str] = None,
+    need: int = 1,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что вкладка панели инструментов активна.
+
+    Делает скриншот и ищет OCR-токены: имя вкладки + дополнительные
+    токены содержимого панели (для подтверждения что панель сменилась).
+
+    Returns:
+        (ok, found_tokens)
+    """
+    tokens = [tab_name]
+    if extra_tokens:
+        tokens.extend(extra_tokens)
+    take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+    return has_tokens(ocr_text, tokens, need)
+
+
+def assert_document_created(
+    screenshot_path: str,
+    tokens: List[str] = None,
+    need: int = 1,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что новый документ создан (редактор перешёл в режим редактирования).
+
+    По умолчанию ищет токены панели инструментов документа.
+    """
+    if tokens is None:
+        tokens = ["Главная", "Вставка", "Макет"]
+    take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+    return has_tokens(ocr_text, tokens, need)
