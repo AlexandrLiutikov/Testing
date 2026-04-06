@@ -3,6 +3,7 @@
 import csv
 import os
 from datetime import datetime
+from typing import Dict, List
 
 
 def _steps_html_rows(steps: list) -> str:
