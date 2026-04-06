@@ -5,6 +5,8 @@ import subprocess
 import time
 from typing import Callable, Optional
 
+from shared.drivers import get_driver
+
 
 def wait_until(condition: Callable[[], bool], timeout_sec: float = 10,
                poll_interval: float = 0.3) -> bool:
@@ -44,3 +46,32 @@ def wait_main_proc(process_name: str = "editors",
                 return int(r.stdout.strip().splitlines()[0])
         time.sleep(0.3)  # polling внутри инфраструктурного метода
     return None
+
+
+def wait_window_stable(pid: int, timeout_sec: float = 3.0) -> bool:
+    """Ожидание стабилизации окна после действия.
+
+    Проверяет, что окно всё ещё существует и его геометрия не меняется
+    в течение короткого интервала (признак завершения анимации/рендеринга).
+
+    Args:
+        pid: PID процесса, окно которого ожидаем.
+        timeout_sec: Максимальное время ожидания стабилизации.
+
+    Returns:
+        True если окно стабилизировалось, False если исчезло.
+    """
+    driver = get_driver()
+    deadline = time.time() + timeout_sec
+    prev_rect = None
+
+    while time.time() < deadline:
+        rect = driver.get_window_rect(pid)
+        if rect is None:
+            return False  # Окно исчезло
+        if prev_rect is not None and rect == prev_rect:
+            return True  # Геометрия не меняется — стабильно
+        prev_rect = rect
+        time.sleep(0.2)
+
+    return prev_rect is not None  # Не успело стабилизироваться, но живо
