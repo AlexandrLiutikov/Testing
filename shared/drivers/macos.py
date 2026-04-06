@@ -20,6 +20,9 @@ class MacOSDriver(BaseDriver):
     def activate_window(self, pid: int) -> None:
         raise NotImplementedError("MacOSDriver.activate_window — ещё не реализован")
 
+    def click_menu_item(self, pid: int, menu_name: str) -> bool:
+        raise NotImplementedError("MacOSDriver.click_menu_item — ещё не реализован")
+
     def click_rel(self, pid: int, rel_x: float, rel_y: float) -> None:
         raise NotImplementedError("MacOSDriver.click_rel — ещё не реализован")
 

@@ -89,3 +89,50 @@ def has_tokens(text: str, tokens: List[str], need: int = 1) -> Tuple[bool, List[
             if prefix in norm and suffix in norm:
                 found.append(token)
     return len(found) >= need, found
+
+
+def find_token_position(text: str, token: str, image_width: int, image_height: int) -> Optional[dict]:
+    """Найти approximate позицию токена в изображении на основе OCR текста.
+    
+    Возвращает dict с 'center_x', 'center_y' или None, если токен не найден.
+    """
+    if not text or not token:
+        return None
+    
+    tn = _normalize(token)
+    lines = text.strip().split('\n')
+    
+    for line_idx, line in enumerate(lines):
+        norm_line = _normalize(line)
+        if tn in norm_line:
+            # Токен найден в строке
+            # Оценим позицию строки в изображении
+            # (приближённо: равномерное распределение строк)
+            total_lines = len(lines)
+            if total_lines == 0:
+                return None
+            
+            # Средняя высота строки
+            line_height = image_height / max(total_lines, 1)
+            
+            # Центр строки по Y
+            center_y = int((line_idx + 0.5) * line_height)
+            
+            # По X: найдём позицию токена в строке
+            if norm_line and tn:
+                token_start = norm_line.find(tn)
+                if token_start >= 0:
+                    # Доля строки, где находится токен
+                    token_ratio_start = token_start / len(norm_line)
+                    token_ratio_width = len(tn) / len(norm_line)
+                    
+                    # Позиция центра токена по X
+                    center_x = int((token_ratio_start + token_ratio_width / 2) * image_width)
+                    
+                    return {
+                        'center_x': center_x,
+                        'center_y': center_y,
+                        'line_index': line_idx,
+                    }
+    
+    return None
