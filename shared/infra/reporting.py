@@ -68,7 +68,7 @@ def _decision_html(decision: dict) -> str:
       </ul>
     </div>
     <div class='decision-section'>
-      <strong>Рекомендац��и:</strong>
+      <strong>Рекомендации:</strong>
       <ul>
 {recs_li}
       </ul>
@@ -107,7 +107,7 @@ def generate_html(
     <div>Кейс: {case_name}</div>
     <div>Запуск: {start.strftime('%Y-%m-%d %H:%M:%S')}</div>
     <div>Окончание: {end.strftime('%Y-%m-%d %H:%M:%S')}</div>
-    <div>Длител��ность: {dur} сек</div>
+    <div>Длительность: {dur} сек</div>
     <div class='env-info'>
       ОС: {env.get('os_name', 'н/д')} | Архитектура: {env.get('architecture', 'н/д')} | Пакет: {env.get('package', 'н/д')}<br>
       Разрешение: {env.get('screen_resolution', 'н/д')} | Масштаб: {env.get('display_scale', 'н/д')} | Версия: {env.get('editor_version', 'н/д')} | Стенд: {env.get('hostname', 'н/д')}
@@ -150,18 +150,18 @@ def generate_md(
     decision: dict,
 ) -> str:
     lines = []
-    lines.append("# Отчёт п�� автотесту R7 Office\n")
+    lines.append("# Отчёт по автотесту R7 Office\n")
     lines.append(f"## Кейс: {case_name}\n")
     lines.append("## Среда\n")
     lines.append(f"- ОС: {env.get('os_name', 'н/д')}")
-    lines.append(f"- Архитектур��: {env.get('architecture', 'н/д')}")
+    lines.append(f"- Архитектура: {env.get('architecture', 'н/д')}")
     lines.append(f"- Пакет: {env.get('package', 'н/д')}")
-    lines.append(f"- Разрешение ��крана: {env.get('screen_resolution', 'н/д')}")
+    lines.append(f"- Разрешение экрана: {env.get('screen_resolution', 'н/д')}")
     lines.append(f"- Масштаб: {env.get('display_scale', 'н/д')}")
     lines.append(f"- Версия редактора: {env.get('editor_version', 'н/д')}")
     lines.append(f"- Стенд: {env.get('hostname', 'н/д')}\n")
 
-    lines.append("## Решение о р��лизе\n")
+    lines.append("## Решение о релизе\n")
     lines.append(f"**{decision['verdict']}**\n")
     for r in decision.get("reasons", []):
         lines.append(f"- {r}")
@@ -169,7 +169,7 @@ def generate_md(
 
     lines.append("## Результаты шагов\n")
     lines.append(
-        "| Step | Шаг | Статус | Severity | Ожидание | Факт | ��криншот |"
+        "| Step | Шаг | Статус | Severity | Ожидание | Факт | Скриншот |"
     )
     lines.append("|------|-----|--------|----------|----------|------|----------|")
     for s in steps:
