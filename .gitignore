@@ -6,11 +6,10 @@ __pycache__/
 products/*/artifacts/
 runtime/
 
-# Claude Code local settings
+# Claude Code / Qwen Code local settings
 .claude/
-
-# Qwen Code local settings
 .qwen/
 
 # Backup files
 *.bak
+*.py.bak
