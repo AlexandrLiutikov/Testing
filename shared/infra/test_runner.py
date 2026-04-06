@@ -27,9 +27,9 @@ from shared.infra.step_results import StepResult
 # ---------------------------------------------------------------------------
 
 def _project_root() -> str:
-    """Корень проекта: shared/infra/test_runner.py → ../../.."""
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))))
+    """Корень проекта: shared/infra/test_runner.py → ../../../"""
+    return os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
 
 
 # ---------------------------------------------------------------------------
