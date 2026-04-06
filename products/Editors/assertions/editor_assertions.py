@@ -1,9 +1,57 @@
-"""Semantic assertions для Editors — продуктовый слой (§16, §17 SCRIPT_RULES)."""
+"""Semantic assertions для Editors — продуктовый слой (§16, §17 SCRIPT_RULES).
 
-from typing import List, Tuple
+Assertions — это проверяющие функции, которые:
+1. Делают скриншот
+2. Выполняют проверку (через OCR или делегируя actions)
+3. Возвращают результат (bool / tuple)
+"""
+
+from typing import List, Optional, Tuple
 
 from shared.infra.ocr import has_tokens, ocr_image
 from shared.infra.screenshots import take_screenshot
+from shared.infra.waits import wait_main_proc
+
+from products.Editors.actions.editor_actions import detect_warning_window
+
+
+def assert_window_exists(
+    process_name: str = "editors",
+    timeout_sec: int = 20,
+) -> Optional[int]:
+    """Проверить, что окно редактора появилось (поиск процесса + ожидание).
+
+    Returns:
+        pid процесса или None если не найдено.
+    """
+    return wait_main_proc(process_name, timeout_sec)
+
+
+def assert_warning_visible(
+    pid: int,
+    timeout_sec: int = 10,
+) -> bool:
+    """Проверить, что предупреждение о регистрации отображается.
+
+    Делегирует detect_warning_window из actions (UIAutomation через PowerShell).
+    """
+    return detect_warning_window(pid, timeout_sec)
+
+
+def assert_warning_closed(
+    pid: Optional[int],
+    timeout_sec: int = 3,
+) -> bool:
+    """Проверить, что предупреждение о регистрации закрыто.
+
+    Returns:
+        True если предупреждение НЕ обнаружено (т.е. закрыто).
+    """
+    if not pid:
+        return False
+    # Если detect_warning_window вернул False — предупреждения нет = закрыто
+    found = detect_warning_window(pid, timeout_sec)
+    return not found
 
 
 def assert_section_visible(
