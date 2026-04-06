@@ -3,7 +3,7 @@
 Этот модуль объединяет всю инфраструктуру, которая раньше дублировалась
 в каждом тест-кейсе:
   - создание директории прогона (run_dir)
-  - функция _step() для формирования результатов шага
+  - формирование результатов шага через StepResult
   - блок try/except/finally
   - генерация artefacts (json, csv, md, html)
   - вывод итогов в stdout
@@ -19,6 +19,7 @@ from shared.infra.environment import collect_environment, platform_tag
 from shared.infra.screenshots import take_screenshot
 from shared.infra.decision import build_release_decision
 from shared.infra.reporting import generate_html, generate_md, write_csv
+from shared.infra.step_results import StepResult
 
 
 # ---------------------------------------------------------------------------
@@ -29,51 +30,6 @@ def _project_root() -> str:
     """Корень проекта: shared/infra/test_runner.py → ../../.."""
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__)))))
-
-
-# ---------------------------------------------------------------------------
-# Step factory
-# ---------------------------------------------------------------------------
-
-def make_step(
-    case_prefix: str,
-    step_num,
-    step_name: str,
-    status: str,
-    expected: str,
-    actual: str,
-    screenshot: str,
-    failure_severity: str = None,
-    failure_area: str = None,
-    failure_detail: str = None,
-    failure_type: str = None,
-    duration_ms: int = 0,
-    critical_path: bool = None,
-) -> dict:
-    """Сформировать dict результата шага (единый формат для всех кейсов)."""
-    result = {
-        "step_id": f"{case_prefix}_step{step_num}",
-        "step": step_num,
-        "step_name": step_name,
-        "status": status,
-        "expected": expected,
-        "actual": actual,
-        "screenshot": screenshot,
-        "timestamp": datetime.now().isoformat(),
-        "duration_ms": duration_ms,
-        "critical_path": critical_path,
-    }
-    if status == "FAIL":
-        result["failure_type"] = failure_type or "TEST_FAIL"
-        result["failure_severity"] = failure_severity or "MEDIUM"
-        result["failure_area"] = failure_area or "CORE_FUNCTION"
-        result["failure_detail"] = failure_detail or actual
-    elif status == "BLOCKED":
-        result["failure_type"] = "BLOCKED"
-        result["failure_severity"] = None
-        result["failure_area"] = None
-        result["failure_detail"] = failure_detail or actual
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -196,12 +152,66 @@ class CaseRunner:
     # --- public API -------------------------------------------------------
 
     def add_step(self, **kwargs) -> dict:
-        """Добавить результат шага."""
-        kwargs.setdefault("critical_path",
-                          self.case_meta.get("critical_path"))
-        step = make_step(self.case_prefix, **kwargs)
-        self.steps.append(step)
-        return step
+        """Добавить результат шага.
+
+        Поддерживает два режима:
+          1. Передать готовый StepResult: runner.add_step(step_result=obj)
+          2. Передать параметры для создания StepResult:
+             runner.add_step(step_num=1, step_name="...", status="PASS", ...)
+        """
+        # Если передан готовый StepResult — используем его
+        if "step_result" in kwargs:
+            step_obj = kwargs["step_result"]
+            self.steps.append(step_obj.to_dict())
+            return step_obj.to_dict()
+
+        # Иначе создаём StepResult из параметров
+        kwargs.setdefault("critical_path", self.case_meta.get("critical_path"))
+        status = kwargs.get("status", "PASS")
+
+        if status == "PASS":
+            step_obj = StepResult.make_pass(
+                case_prefix=self.case_prefix,
+                step_num=kwargs["step_num"],
+                step_name=kwargs["step_name"],
+                expected=kwargs["expected"],
+                actual=kwargs["actual"],
+                screenshot=kwargs.get("screenshot", ""),
+                duration_ms=kwargs.get("duration_ms", 0),
+                critical_path=kwargs.get("critical_path", False),
+            )
+        elif status == "FAIL":
+            step_obj = StepResult.make_fail(
+                case_prefix=self.case_prefix,
+                step_num=kwargs["step_num"],
+                step_name=kwargs["step_name"],
+                expected=kwargs["expected"],
+                actual=kwargs["actual"],
+                screenshot=kwargs.get("screenshot", ""),
+                duration_ms=kwargs.get("duration_ms", 0),
+                failure_severity=kwargs.get("failure_severity", "MEDIUM"),
+                failure_area=kwargs.get("failure_area", "CORE_FUNCTION"),
+                failure_detail=kwargs.get("failure_detail", ""),
+                failure_type=kwargs.get("failure_type", "TEST_FAIL"),
+                critical_path=kwargs.get("critical_path", False),
+            )
+        elif status == "BLOCKED":
+            step_obj = StepResult.make_blocked(
+                case_prefix=self.case_prefix,
+                step_num=kwargs["step_num"],
+                step_name=kwargs["step_name"],
+                expected=kwargs["expected"],
+                actual=kwargs["actual"],
+                screenshot=kwargs.get("screenshot", ""),
+                duration_ms=kwargs.get("duration_ms", 0),
+                failure_detail=kwargs.get("failure_detail", ""),
+                critical_path=kwargs.get("critical_path", False),
+            )
+        else:
+            raise ValueError(f"Неподдерживаемый статус шага: {status}")
+
+        self.steps.append(step_obj.to_dict())
+        return step_obj.to_dict()
 
     def fail_if_no_steps_passed(self, error: Exception) -> None:
         """Если ни одного шага не добавлено — добавить FAIL step."""
