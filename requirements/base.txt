@@ -1,0 +1,3 @@
+pyautogui          # скриншоты, мышь, клавиатура (все ОС)
+Pillow             # работа с изображениями
+pytesseract        # OCR через Tesseract

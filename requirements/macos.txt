@@ -1,0 +1,2 @@
+atomacos           # AXUIElement (macOS)
+pyobjc-core        # Objective-C bridge
