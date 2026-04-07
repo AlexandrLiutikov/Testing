@@ -248,6 +248,7 @@ class CaseRunner:
         print(f"RUN_DIR={self.run_dir}")
         print(f"STATUS={overall}")
         print(f"VERDICT={self.decision['verdict']}")
+        print(f"REPORT_HTML={os.path.join(self.run_dir, 'report.html')}")
         print(f"ENVIRONMENT={self.env['os_name']} "
               f"{self.env['architecture']} "
               f"{self.env['screen_resolution']}")
