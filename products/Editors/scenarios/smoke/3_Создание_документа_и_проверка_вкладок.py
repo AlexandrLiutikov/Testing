@@ -2,8 +2,9 @@
 Автотест: Создание нового документа и проверка вкладок на панели инструментов.
 Кейс 3 — Smoke (Документы).
 
-Предусловие: редактор запущен (кейс 2 выполнен), отображается вкладка «Главная».
-Постусловие: редактор остаётся открытым с созданным документом, вкладка «Плагины» активна.
+Предусловие: редактор запущен (после кейса 2), отображается главное окно редактора вкладка «Главная».
+Постусловие: редактор остаётся открытым с созданным документом, вкладка
+«Плагины» активна (цепочка smoke-прогона).
 """
 
 import argparse
@@ -25,11 +26,12 @@ from shared.infra.screenshots import take_screenshot
 from shared.infra.decision import build_release_decision
 from shared.infra.reporting import generate_html, generate_md, write_csv
 from shared.infra.waits import wait_main_proc, wait_until
-from shared.drivers.base import activate_window
+from shared.drivers import get_driver
 
 from products.Editors.actions.editor_actions import (
     create_document,
     click_toolbar_tab,
+    calibrate_toolbar_tabs,
 )
 from products.Editors.assertions.editor_assertions import (
     assert_document_created,
@@ -50,62 +52,92 @@ CASE_META = {
 }
 
 
+# Уникальное содержимое панелей вкладок — проверяется через OCR.
+# Имена вкладок НЕ используются как токены: они видны в ленте всегда.
+# (см. память: OCR assertions — check unique panel content)
+TABS_PLAN = [
+    # (step_num, tab_name, expected, tokens, need)
+    (2, "Файл",
+     "Вкладка «Файл» активна. Открыто меню «Сведения о документе»",
+     ["Сведения", "Сохранить как", "Скачать как", "Версия"], 2),
+    (3, "Вставка",
+     "Вкладка «Вставка» активна, подчёркнута синей линией",
+     ["Таблица", "Изображение", "Диаграмма", "Колонтитулы"], 2),
+    (4, "Рисование",
+     "Вкладка «Рисование» активна, подчёркнута синей линией",
+     ["Выбрать", "Перо", "Маркер", "Ластик"], 1),
+    (5, "Макет",
+     "Вкладка «Макет» активна, подчёркнута синей линией",
+     ["Поля", "Ориентация", "Размер", "Колонки"], 2),
+    (6, "Ссылки",
+     "Вкладка «Ссылки» активна, подчёркнута синей линией",
+     ["Оглавление", "Сноска", "Закладка", "Гиперссылка"], 2),
+    (7, "Совместная работа",
+     "Вкладка «Совместная работа» активна, подчёркнута синей линией",
+     ["Комментарий", "Сравнить"], 1),
+    (8, "Защита",
+     "Вкладка «Защита» активна, подчёркнута синей линией",
+     ["Зашифровать", "Подпись"], 1),
+    (9, "Вид",
+     "Вкладка «Вид» активна, подчёркнута синей линией",
+     ["Масштаб", "Линейка", "Непечатаемые"], 1),
+    (10, "Плагины",
+     "Вкладка «Плагины» активна, подчёркнута синей линией",
+     ["Макросы", "Менеджер"], 1),
+]
+
+
 # ---------------------------------------------------------------------------
-# Вспомогательная функция для формирования step_result (§15 SCRIPT_RULES)
+# Helper формирования step_result (§15 SCRIPT_RULES)
 # ---------------------------------------------------------------------------
 
-def _step(step_num, step_name, status, expected, actual, screenshot,
+def _step(num, name, status, expected, actual, shot,
           failure_severity=None, failure_area=None, failure_detail=None,
-          failure_type=None, duration_ms=0, critical_path=None):
-    result = {
-        "step_id": f"case3_step{step_num}",
-        "step": step_num,
-        "step_name": step_name,
+          failure_type=None, duration_ms=0):
+    r = {
+        "step_id": f"case3_step{num}",
+        "step": num,
+        "step_name": name,
         "status": status,
         "expected": expected,
         "actual": actual,
-        "screenshot": screenshot,
+        "screenshot": shot,
         "timestamp": datetime.now().isoformat(),
         "duration_ms": duration_ms,
-        "critical_path": critical_path if critical_path is not None else CASE_META["critical_path"],
+        "critical_path": CASE_META["critical_path"],
     }
     if status == "FAIL":
-        result["failure_type"] = failure_type or "TEST_FAIL"
-        result["failure_severity"] = failure_severity or "HIGH"
-        result["failure_area"] = failure_area or "CORE_FUNCTION"
-        result["failure_detail"] = failure_detail or actual
-    elif status == "BLOCKED":
-        result["failure_type"] = "BLOCKED"
-        result["failure_severity"] = None
-        result["failure_area"] = None
-        result["failure_detail"] = failure_detail or actual
-    return result
+        r["failure_type"] = failure_type or "TEST_FAIL"
+        # Smoke-правило: все сбои HIGH (см. память: Smoke severity rule)
+        r["failure_severity"] = failure_severity or "HIGH"
+        r["failure_area"] = failure_area or "CORE_FUNCTION"
+        r["failure_detail"] = failure_detail or actual
+    return r
 
 
-# ---------------------------------------------------------------------------
-# Шаблон проверки вкладки панели инструментов
-# ---------------------------------------------------------------------------
-
-def _do_tab_step(pid, step_num, tab_name, expected, shot_path,
-                 content_tokens=None, need=1):
-    """Клик по вкладке + assertion через OCR по уникальному контенту панели."""
+def _tab_step(pid, num, tab_name, expected, shot_path, tokens, need, positions=None):
+    """Клик по вкладке + семантическая проверка через уникальный контент панели."""
     t0 = datetime.now()
-    click_toolbar_tab(pid, tab_name)
-    ok, found = assert_tab_active(shot_path, tab_name, content_tokens, need)
+    click_toolbar_tab(pid, tab_name, positions=positions)
+    ok, _ = assert_tab_active(shot_path, tab_name, tokens, need)
     dur = int((datetime.now() - t0).total_seconds() * 1000)
 
     if ok:
-        return _step(step_num, f"Клик по вкладке «{tab_name}»", "PASS",
-                     expected,
-                     f"Вкладка «{tab_name}» активна, содержимое панели отображается",
-                     shot_path, duration_ms=dur)
-    return _step(step_num, f"Клик по вкладке «{tab_name}»", "FAIL",
-                 expected,
-                 f"Вкладка «{tab_name}» не подтверждена на экране после клика",
-                 shot_path, failure_severity="HIGH",
-                 failure_area="CORE_FUNCTION",
-                 failure_detail=f"Вкладка «{tab_name}» не отображается — базовая функция недоступна",
-                 duration_ms=dur)
+        return _step(
+            num, f"Клик по вкладке «{tab_name}»", "PASS", expected,
+            f"Вкладка «{tab_name}» активна, содержимое панели отображается",
+            shot_path, duration_ms=dur,
+        )
+    return _step(
+        num, f"Клик по вкладке «{tab_name}»", "FAIL", expected,
+        f"Вкладка «{tab_name}» не подтверждена на экране после клика",
+        shot_path,
+        failure_detail=(
+            f"Вкладка «{tab_name}» не отображается — базовая функция "
+            f"панели инструментов недоступна"
+        ),
+        duration_ms=dur,
+    )
 
 
 # ===========================================================================
@@ -136,9 +168,9 @@ def main():
     start = datetime.now()
 
     try:
-        # ==============================================================
-        # Предусловие: редактор уже открыт (кейс 2)
-        # ==============================================================
+        # ------------------------------------------------------------
+        # Предусловие: редактор открыт (кейс 2 выполнен)
+        # ------------------------------------------------------------
         pid = wait_main_proc("editors", 20)
         if not pid:
             err_shot = os.path.join(run_dir, "00_no_editor.png")
@@ -147,191 +179,102 @@ def main():
                 0, "Предусловие: редактор открыт", "FAIL",
                 "Редактор запущен (после кейса 2)",
                 "Окно редактора не найдено", err_shot,
-                failure_severity="CRITICAL",
-                failure_area="CORE_FUNCTION",
-                failure_detail="Окно редактора не найдено. Сначала выполните кейсы 1 и 2.",
+                failure_detail=(
+                    "Окно редактора не найдено. "
+                    "Сначала выполните кейсы 1 и 2."
+                ),
             ))
-            raise RuntimeError(
-                "Не найдено открытое окно редактора. "
-                "Сначала выполните 1_Запуск_редактора.py и 2_Главное_окно_редактора.py."
-            )
+            raise RuntimeError("Редактор не запущен")
 
-        activate_window(pid)
+        get_driver().activate_window(pid)
 
-        # ==============================================================
-        # Шаг 1: Кликнуть на кнопку «Документ» — создание нового документа
-        # Критический путь: создание нового документа
-        # ==============================================================
+        # ------------------------------------------------------------
+        # Шаг 1: Создание нового документа (critical path)
+        # Ожидание: до 10 сек на загрузку документа (§10.5, ТК).
+        # ------------------------------------------------------------
         t0 = datetime.now()
         s1_path = os.path.join(run_dir, "01_new_document.png")
 
         create_document(pid, "document")
 
-        # Ожидание загрузки документа — до 10 сек, минимум 5 сек (§10.5, ТК)
-        # Документ должен полностью прогрузиться перед проверкой вкладок.
-        pid = wait_main_proc("editors", 10)
-        if pid:
-            activate_window(pid)
+        # После создания процесс редактора может переключиться — переполучить pid
+        new_pid = wait_main_proc("editors", 10)
+        if new_pid:
+            pid = new_pid
+            get_driver().activate_window(pid)
 
-        def _doc_loaded():
-            """Проверить что документ прогрузился (лента видна)."""
-            take_screenshot(s1_path)
-            from shared.infra.ocr import ocr_image, has_tokens as _ht
-            text = ocr_image(s1_path)
-            ok, _ = _ht(text, ["Обычный", "Без интервала", "Заголовок"], 2)
-            return ok
-
-        wait_until(_doc_loaded, timeout_sec=10, poll_interval=1.0)
-
-        ok, found = assert_document_created(
-            s1_path,
-            tokens=["Обычный", "Без интервала", "Заголовок"],
-            need=2,
+        # Ожидание загрузки документа через семантический assertion
+        # Токены, устойчивые к OCR-искажениям и масштабам экрана.
+        # «Междустрочный» — заголовок правой панели стилей абзаца, появляется
+        # только после создания документа. «Множитель» — её содержимое.
+        # «Страница» — индикатор статус-бара документа.
+        doc_tokens = ["Междустрочный", "Множитель", "Страница", "Количество"]
+        wait_until(
+            lambda: assert_document_created(s1_path, tokens=doc_tokens, need=2)[0],
+            timeout_sec=10,
+            poll_interval=1.0,
         )
+        ok, _ = assert_document_created(s1_path, tokens=doc_tokens, need=2)
         dur1 = int((datetime.now() - t0).total_seconds() * 1000)
 
         if ok:
             steps.append(_step(
                 1, "Создание нового документа", "PASS",
-                "Новый документ создан. Вкладка «Главная» активна, подчёркнута синей линией",
-                "Новый документ создан. На панели инструментов отображаются вкладки редактора",
-                s1_path, duration_ms=dur1, critical_path=True,
+                "Новый документ создан. Вкладка «Главная» активна, "
+                "подчёркнута синей линией",
+                "Новый документ создан. На панели инструментов отображаются "
+                "элементы вкладки «Главная»",
+                s1_path, duration_ms=dur1,
             ))
         else:
             steps.append(_step(
                 1, "Создание нового документа", "FAIL",
-                "Новый документ создан. Вкладка «Главная» активна, подчёркнута синей линией",
+                "Новый документ создан. Вкладка «Главная» активна, "
+                "подчёркнута синей линией",
                 "Документ не создан или панель инструментов не отображается",
                 s1_path,
-                failure_severity="HIGH",
-                failure_area="CORE_FUNCTION",
                 failure_detail="Не удалось создать новый документ из стартового экрана",
-                duration_ms=dur1, critical_path=True,
+                duration_ms=dur1,
             ))
             raise RuntimeError("Не удалось создать новый документ")
 
-        # ==============================================================
-        # Шаг 2: Клик по вкладке «Файл»
-        # Уникальный контент: меню «Сведения», «Сохранить как», «Скачать как»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 2, "Файл",
-            "Вкладка «Файл» активна. Открыто меню «Сведения о документе»",
-            os.path.join(run_dir, "02_tab_file.png"),
-            content_tokens=["Сведения", "Сохранить как", "Скачать как", "Версия"],
-            need=2,
-        ))
+        # ------------------------------------------------------------
+        # Калибровка координат вкладок через OCR на текущем разрешении.
+        # Хардкод TOOLBAR_TABS рассчитан на 1920x1080; на других экранах
+        # rel_x/rel_y отличаются, поэтому ищем вкладки на свежем скриншоте.
+        # ------------------------------------------------------------
+        tab_positions = calibrate_toolbar_tabs(s1_path)
 
-        # ==============================================================
-        # Шаг 3: Клик по вкладке «Вставка»
-        # Уникальный контент панели: «Таблица», «Изображение», «Диаграмма»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 3, "Вставка",
-            "Вкладка «Вставка» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "03_tab_insert.png"),
-            content_tokens=["Таблица", "Изображение", "Диаграмма", "Колонтитулы"],
-            need=2,
-        ))
-
-        # ==============================================================
-        # Шаг 4: Клик по вкладке «Рисование»
-        # Уникальный контент: «Выбрать», «Перо», «Маркер», «Ластик»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 4, "Рисование",
-            "Вкладка «Рисование» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "04_tab_draw.png"),
-            content_tokens=["Выбрать", "Перо", "Маркер", "Ластик"],
-            need=1,
-        ))
-
-        # ==============================================================
-        # Шаг 5: Клик по вкладке «Макет»
-        # Уникальный контент: «Поля», «Ориентация», «Размер», «Колонки»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 5, "Макет",
-            "Вкладка «Макет» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "05_tab_layout.png"),
-            content_tokens=["Поля", "Ориентация", "Размер", "Колонки"],
-            need=2,
-        ))
-
-        # ==============================================================
-        # Шаг 6: Клик по вкладке «Ссылки»
-        # Уникальный контент: «Оглавление», «Сноска», «Закладка»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 6, "Ссылки",
-            "Вкладка «Ссылки» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "06_tab_references.png"),
-            content_tokens=["Оглавление", "Сноска", "Закладка", "Гиперссылка"],
-            need=2,
-        ))
-
-        # ==============================================================
-        # Шаг 7: Клик по вкладке «Совместная работа»
-        # Уникальный контент: «Комментарий», «Сравнить»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 7, "Совместная работа",
-            "Вкладка «Совместная работа» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "07_tab_collab.png"),
-            content_tokens=["Комментарий", "Сравнить"],
-            need=1,
-        ))
-
-        # ==============================================================
-        # Шаг 8: Клик по вкладке «Защита»
-        # Уникальный контент: «Зашифровать», «Подпись»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 8, "Защита",
-            "Вкладка «Защита» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "08_tab_protect.png"),
-            content_tokens=["Зашифровать", "Подпись"],
-            need=1,
-        ))
-
-        # ==============================================================
-        # Шаг 9: Клик по вкладке «Вид»
-        # Уникальный контент: «Масштаб», «Линейка»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 9, "Вид",
-            "Вкладка «Вид» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "09_tab_view.png"),
-            content_tokens=["Масштаб", "Линейка", "Непечатаемые"],
-            need=1,
-        ))
-
-        # ==============================================================
-        # Шаг 10: Клик по вкладке «Плагины»
-        # Уникальный контент: «Макросы», «Менеджер»
-        # ==============================================================
-        steps.append(_do_tab_step(
-            pid, 10, "Плагины",
-            "Вкладка «Плагины» активна, подчёркнута синей линией",
-            os.path.join(run_dir, "10_tab_plugins.png"),
-            content_tokens=["Макросы", "Менеджер"],
-            need=1,
-        ))
+        # ------------------------------------------------------------
+        # Шаги 2–10: клик по вкладкам ленты + проверка их содержимого
+        # ------------------------------------------------------------
+        for num, tab_name, expected, tokens, need in TABS_PLAN:
+            shot = os.path.join(run_dir, f"{num:02d}_tab_{num}.png")
+            steps.append(_tab_step(
+                pid, num, tab_name, expected, shot, tokens, need,
+                positions=tab_positions,
+            ))
+            # После вкладки «Файл» открывается полноэкранное меню backstage,
+            # которое перекрывает ленту. Закрываем его клавишей Esc, чтобы
+            # последующие клики по вкладкам попадали в ленту, а не в backstage.
+            if tab_name == "Файл":
+                get_driver().send_escape(pid)
 
     except Exception as e:
         if not any(s["status"] == "FAIL" for s in steps):
             err_shot = os.path.join(run_dir, "99_error.png")
-            take_screenshot(err_shot)
+            try:
+                take_screenshot(err_shot)
+            except Exception:
+                pass
             steps.append(_step(
                 99, "Ошибка выполнения", "FAIL",
                 "Кейс выполнен без ошибок", str(e), err_shot,
-                failure_severity="CRITICAL",
-                failure_area="CORE_FUNCTION",
                 failure_detail=str(e),
             ))
 
     finally:
-        # Постусловие: редактор остаётся открытым (§10.1, цепочка кейсов)
+        # Постусловие (§10.1): редактор остаётся открытым для следующего кейса
         pass
 
     end = datetime.now()
@@ -339,7 +282,7 @@ def main():
 
     decision = build_release_decision(steps, CASE_META)
 
-    # --- Формирование артефактов ---
+    # --- Артефакты ---
     json_path = os.path.join(run_dir, "results.json")
     csv_path = os.path.join(run_dir, "results.csv")
     md_path = os.path.join(run_dir, "report.md")
@@ -374,7 +317,7 @@ def main():
     if os.path.isfile(css_src):
         shutil.copy2(css_src, os.path.join(run_dir, "report.css"))
 
-    overall_status = "PASS" if all(s["status"] == "PASS" for s in steps) else "FAIL"
+    overall_status = "PASS" if steps and all(s["status"] == "PASS" for s in steps) else "FAIL"
     print(f"RUN_DIR={run_dir}")
     print(f"STATUS={overall_status}")
     print(f"VERDICT={decision['verdict']}")

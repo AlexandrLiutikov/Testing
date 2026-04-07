@@ -1,35 +1,16 @@
-"""Semantic actions для Editors — продуктовый слой (§16, §17 SCRIPT_RULES)."""
+"""Semantic actions для Editors — продуктовый слой (§16, §17 SCRIPT_RULES).
+
+ВАЖНО: хардкод координат UI запрещён. R7 Office использует CEF, элементы
+ленты и стартового экрана недоступны через Accessibility API, поэтому клики
+выполняются по координатам — но координаты получаются в **runtime** через
+OCR (`shared.infra.ocr.find_token_bbox`) на свежем скриншоте окна, а не
+зашиваются в код. Это единственный способ работать на любых разрешениях.
+"""
 
 import time
 
 from shared.drivers import get_driver
-
-# Кнопки создания документов на стартовом экране (относительные координаты)
-# Калибровка: 1920x1080, масштаб 100%, полноэкранное окно
-DOC_CREATE_BUTTONS = {
-    "document":      (0.365, 0.39),
-    "spreadsheet":   (0.453, 0.39),
-    "presentation":  (0.542, 0.39),
-}
-
-# Вкладки панели инструментов внутри редактора документов (относительные координаты)
-# R7 Office использует CEF для отрисовки UI — Accessibility API недоступен
-# для вкладок панели инструментов, поэтому используется координатный fallback.
-# Калибровка: 1920x1080, масштаб 100%, полноэкранное окно.
-# rel_y=0.060 — центр строки вкладок ленты (y≈65px из 1080).
-# ВАЖНО: rel_y=0.03 попадает в title bar, а не в ленту!
-TOOLBAR_TABS = {
-    "Файл":                (0.012, 0.060),
-    "Главная":             (0.045, 0.060),
-    "Вставка":             (0.081, 0.060),
-    "Рисование":           (0.124, 0.060),
-    "Макет":               (0.166, 0.060),
-    "Ссылки":              (0.199, 0.060),
-    "Совместная работа":   (0.256, 0.060),
-    "Защита":              (0.307, 0.060),
-    "Вид":                 (0.333, 0.060),
-    "Плагины":             (0.365, 0.060),
-}
+from shared.infra.screenshots import take_screenshot
 
 
 def click_menu(pid: int, menu_key: str):
@@ -59,28 +40,125 @@ def dismiss_collab_popup(pid: int):
     driver.send_escape(pid)
 
 
-def create_document(pid: int, doc_type: str = "document"):
+_DOC_LABELS = {
+    "document":     "Документ",
+    "spreadsheet":  "Таблица",
+    "presentation": "Презентация",
+}
+
+
+def _ocr_click_label(pid: int, screenshot_path: str, query: str) -> bool:
+    """Найти на скриншоте текстовую метку *query* и кликнуть по её центру.
+
+    Внутренний helper для координатных кликов с runtime OCR-калибровкой.
+    """
+    from PIL import Image
+    from shared.infra.ocr import find_token_bbox
+
+    bbox = find_token_bbox(screenshot_path, query)
+    if not bbox:
+        return False
+    img = Image.open(screenshot_path)
+    W, H = img.size
+    rel_x = bbox["center_x"] / W
+    rel_y = bbox["center_y"] / H
+    driver = get_driver()
+    driver.activate_window(pid)
+    driver.click_rel(pid, rel_x, rel_y)
+    return True
+
+
+def create_document(pid: int, doc_type: str = "document",
+                    screenshot_path: str = None):
     """Кликнуть по кнопке создания документа на стартовом экране.
 
-    doc_type: "document" | "spreadsheet" | "presentation"
+    Координаты кнопки определяются в runtime через OCR — поиск подписи
+    («Документ»/«Таблица»/«Презентация») на свежем скриншоте.
+
+    Args:
+        pid: процесс редактора
+        doc_type: "document" | "spreadsheet" | "presentation"
+        screenshot_path: путь для рабочего скриншота калибровки. Если не
+            задан — используется временный файл рядом с editors artifacts.
     """
-    if doc_type not in DOC_CREATE_BUTTONS:
+    if doc_type not in _DOC_LABELS:
         raise ValueError(f"Неизвестный тип документа: {doc_type}")
-    activate_window(pid)
-    rel_x, rel_y = DOC_CREATE_BUTTONS[doc_type]
-    click_rel(pid, rel_x, rel_y)
+    driver = get_driver()
+    driver.activate_window(pid)
+
+    # Свежий скриншот стартового экрана для OCR-калибровки
+    import tempfile, os as _os
+    if not screenshot_path:
+        fd, screenshot_path = tempfile.mkstemp(prefix="start_", suffix=".png")
+        _os.close(fd)
+    take_screenshot(screenshot_path)
+
+    label = _DOC_LABELS[doc_type]
+    if not _ocr_click_label(pid, screenshot_path, label):
+        raise RuntimeError(
+            f"Не удалось найти кнопку «{label}» на стартовом экране через OCR"
+        )
 
 
-def click_toolbar_tab(pid: int, tab_name: str):
-    """Кликнуть по вкладке на панели инструментов редактора.
+def click_toolbar_tab(pid: int, tab_name: str, positions: dict):
+    """Кликнуть по вкладке ленты по откалиброванным координатам.
 
-    tab_name: одно из значений в TOOLBAR_TABS (например, "Главная", "Вставка").
+    Args:
+        pid: процесс редактора
+        tab_name: имя вкладки (например, "Главная", "Вставка")
+        positions: dict {tab_name: (rel_x, rel_y)} от calibrate_toolbar_tabs().
+            Хардкод координат запрещён — словарь обязателен.
     """
-    if tab_name not in TOOLBAR_TABS:
-        raise ValueError(f"Неизвестная вкладка: {tab_name}")
-    activate_window(pid)
-    rel_x, rel_y = TOOLBAR_TABS[tab_name]
-    click_rel(pid, rel_x, rel_y)
+    coords = positions.get(tab_name) if positions else None
+    if not coords:
+        raise RuntimeError(
+            f"Координаты вкладки «{tab_name}» не откалиброваны. "
+            f"Перед кликом вызовите calibrate_toolbar_tabs()."
+        )
+    driver = get_driver()
+    driver.activate_window(pid)
+    rel_x, rel_y = coords
+    driver.click_rel(pid, rel_x, rel_y)
+
+
+# Имена вкладок ленты в порядке отображения. Многословные («Совместная работа»)
+# ищем по первому слову — OCR хуже ловит составные токены.
+_TAB_QUERIES = {
+    "Файл": "Файл",
+    "Главная": "Главная",
+    "Вставка": "Вставка",
+    "Рисование": "Рисование",
+    "Макет": "Макет",
+    "Ссылки": "Ссылки",
+    "Совместная работа": "Совместная",
+    "Защита": "Защита",
+    "Вид": "Вид",
+    "Плагины": "Плагины",
+}
+
+
+def calibrate_toolbar_tabs(screenshot_path: str) -> dict:
+    """Откалибровать координаты вкладок ленты через OCR на свежем скриншоте.
+
+    Скриншот должен быть полноэкранный, окно редактора — fullscreen,
+    видна лента вкладок (документ создан, backstage закрыт).
+
+    Returns:
+        dict {tab_name: (rel_x, rel_y)} в долях окна. Вкладки, которые OCR
+        не нашёл, в результат не попадают — клик по ним поднимет ошибку.
+    """
+    from PIL import Image
+    from shared.infra.ocr import find_token_bbox
+
+    img = Image.open(screenshot_path)
+    W, H = img.size
+
+    result = {}
+    for tab_name, query in _TAB_QUERIES.items():
+        bbox = find_token_bbox(screenshot_path, query)
+        if bbox:
+            result[tab_name] = (bbox["center_x"] / W, bbox["center_y"] / H)
+    return result
 
 
 # ---------------------------------------------------------------------------
