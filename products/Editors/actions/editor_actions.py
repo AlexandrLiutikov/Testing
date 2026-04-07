@@ -66,9 +66,10 @@ def create_document(pid: int, doc_type: str = "document"):
     """
     if doc_type not in DOC_CREATE_BUTTONS:
         raise ValueError(f"Неизвестный тип документа: {doc_type}")
-    activate_window(pid)
+    driver = get_driver()
+    driver.activate_window(pid)
     rel_x, rel_y = DOC_CREATE_BUTTONS[doc_type]
-    click_rel(pid, rel_x, rel_y)
+    driver.click_rel(pid, rel_x, rel_y)
 
 
 def click_toolbar_tab(pid: int, tab_name: str):
@@ -78,9 +79,10 @@ def click_toolbar_tab(pid: int, tab_name: str):
     """
     if tab_name not in TOOLBAR_TABS:
         raise ValueError(f"Неизвестная вкладка: {tab_name}")
-    activate_window(pid)
+    driver = get_driver()
+    driver.activate_window(pid)
     rel_x, rel_y = TOOLBAR_TABS[tab_name]
-    click_rel(pid, rel_x, rel_y)
+    driver.click_rel(pid, rel_x, rel_y)
 
 
 # ---------------------------------------------------------------------------
