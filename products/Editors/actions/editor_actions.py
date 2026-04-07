@@ -75,17 +75,66 @@ def create_document(pid: int, doc_type: str = "document"):
     driver.click_rel(pid, rel_x, rel_y)
 
 
-def click_toolbar_tab(pid: int, tab_name: str):
+def click_toolbar_tab(pid: int, tab_name: str, positions: dict = None):
     """Кликнуть по вкладке на панели инструментов редактора.
 
-    tab_name: одно из значений в TOOLBAR_TABS (например, "Главная", "Вставка").
+    Args:
+        pid: процесс редактора
+        tab_name: имя вкладки (например, "Главная", "Вставка")
+        positions: опциональный dict {tab_name: (rel_x, rel_y)} с
+            откалиброванными координатами для текущего разрешения.
+            Если не передан — используется TOOLBAR_TABS (хардкод 1920x1080).
     """
-    if tab_name not in TOOLBAR_TABS:
+    coords = (positions or {}).get(tab_name) or TOOLBAR_TABS.get(tab_name)
+    if not coords:
         raise ValueError(f"Неизвестная вкладка: {tab_name}")
     driver = get_driver()
     driver.activate_window(pid)
-    rel_x, rel_y = TOOLBAR_TABS[tab_name]
+    rel_x, rel_y = coords
     driver.click_rel(pid, rel_x, rel_y)
+
+
+def calibrate_toolbar_tabs(screenshot_path: str) -> dict:
+    """Откалибровать координаты вкладок ленты через OCR на свежем скриншоте.
+
+    Хардкод координат не работает на разных разрешениях/масштабах.
+    Эта функция находит каждую вкладку на скриншоте через find_token_bbox
+    и возвращает dict {tab_name: (rel_x, rel_y)} в долях окна.
+
+    Скриншот должен быть полноэкранный, окно редактора — fullscreen,
+    видна лента вкладок (документ создан, backstage закрыт).
+
+    Returns:
+        dict откалиброванных координат. Вкладки, которые OCR не нашёл,
+        в результат не попадают — для них останется fallback на TOOLBAR_TABS.
+    """
+    from PIL import Image
+    from shared.infra.ocr import find_token_bbox
+
+    img = Image.open(screenshot_path)
+    W, H = img.size
+
+    # Имена для поиска: для «Совместная работа» ищем по первому слову,
+    # т.к. многословные токены OCR ловит хуже.
+    tab_query = {
+        "Файл": "Файл",
+        "Главная": "Главная",
+        "Вставка": "Вставка",
+        "Рисование": "Рисование",
+        "Макет": "Макет",
+        "Ссылки": "Ссылки",
+        "Совместная работа": "Совместная",
+        "Защита": "Защита",
+        "Вид": "Вид",
+        "Плагины": "Плагины",
+    }
+
+    result = {}
+    for tab_name, query in tab_query.items():
+        bbox = find_token_bbox(screenshot_path, query)
+        if bbox:
+            result[tab_name] = (bbox["center_x"] / W, bbox["center_y"] / H)
+    return result
 
 
 # ---------------------------------------------------------------------------

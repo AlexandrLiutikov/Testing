@@ -31,6 +31,7 @@ from shared.drivers import get_driver
 from products.Editors.actions.editor_actions import (
     create_document,
     click_toolbar_tab,
+    calibrate_toolbar_tabs,
 )
 from products.Editors.assertions.editor_assertions import (
     assert_document_created,
@@ -114,10 +115,10 @@ def _step(num, name, status, expected, actual, shot,
     return r
 
 
-def _tab_step(pid, num, tab_name, expected, shot_path, tokens, need):
+def _tab_step(pid, num, tab_name, expected, shot_path, tokens, need, positions=None):
     """Клик по вкладке + семантическая проверка через уникальный контент панели."""
     t0 = datetime.now()
-    click_toolbar_tab(pid, tab_name)
+    click_toolbar_tab(pid, tab_name, positions=positions)
     ok, _ = assert_tab_active(shot_path, tab_name, tokens, need)
     dur = int((datetime.now() - t0).total_seconds() * 1000)
 
@@ -238,11 +239,21 @@ def main():
             raise RuntimeError("Не удалось создать новый документ")
 
         # ------------------------------------------------------------
+        # Калибровка координат вкладок через OCR на текущем разрешении.
+        # Хардкод TOOLBAR_TABS рассчитан на 1920x1080; на других экранах
+        # rel_x/rel_y отличаются, поэтому ищем вкладки на свежем скриншоте.
+        # ------------------------------------------------------------
+        tab_positions = calibrate_toolbar_tabs(s1_path)
+
+        # ------------------------------------------------------------
         # Шаги 2–10: клик по вкладкам ленты + проверка их содержимого
         # ------------------------------------------------------------
         for num, tab_name, expected, tokens, need in TABS_PLAN:
             shot = os.path.join(run_dir, f"{num:02d}_tab_{num}.png")
-            steps.append(_tab_step(pid, num, tab_name, expected, shot, tokens, need))
+            steps.append(_tab_step(
+                pid, num, tab_name, expected, shot, tokens, need,
+                positions=tab_positions,
+            ))
             # После вкладки «Файл» открывается полноэкранное меню backstage,
             # которое перекрывает ленту. Закрываем его клавишей Esc, чтобы
             # последующие клики по вкладкам попадали в ленту, а не в backstage.
