@@ -26,7 +26,7 @@ from shared.infra.screenshots import take_screenshot
 from shared.infra.decision import build_release_decision
 from shared.infra.reporting import generate_html, generate_md, write_csv
 from shared.infra.waits import wait_main_proc, wait_until
-from shared.drivers.base import activate_window
+from shared.drivers import get_driver
 
 from products.Editors.actions.editor_actions import (
     create_document,
@@ -185,7 +185,7 @@ def main():
             ))
             raise RuntimeError("Редактор не запущен")
 
-        activate_window(pid)
+        get_driver().activate_window(pid)
 
         # ------------------------------------------------------------
         # Шаг 1: Создание нового документа (critical path)
@@ -200,7 +200,7 @@ def main():
         new_pid = wait_main_proc("editors", 10)
         if new_pid:
             pid = new_pid
-            activate_window(pid)
+            get_driver().activate_window(pid)
 
         # Ожидание загрузки документа через семантический assertion
         doc_tokens = ["Обычный", "Без интервала", "Заголовок"]
