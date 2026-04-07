@@ -243,6 +243,11 @@ def main():
         for num, tab_name, expected, tokens, need in TABS_PLAN:
             shot = os.path.join(run_dir, f"{num:02d}_tab_{num}.png")
             steps.append(_tab_step(pid, num, tab_name, expected, shot, tokens, need))
+            # После вкладки «Файл» открывается полноэкранное меню backstage,
+            # которое перекрывает ленту. Закрываем его клавишей Esc, чтобы
+            # последующие клики по вкладкам попадали в ленту, а не в backstage.
+            if tab_name == "Файл":
+                get_driver().send_escape(pid)
 
     except Exception as e:
         if not any(s["status"] == "FAIL" for s in steps):
