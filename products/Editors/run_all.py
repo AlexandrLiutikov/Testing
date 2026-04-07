@@ -178,7 +178,8 @@ def _case_rows_html(case_results: list) -> str:
         run_dir_text = r.get("run_dir", "-") or "-"
         log_link = ""
         if r.get("log_file"):
-            log_link = f"<br><a href='{os.path.basename(r['log_file'])}' class='log-link'>Лог</a>"
+            sep = "<br>" if report_link else ""
+            log_link = f"{sep}<a href='{os.path.basename(r['log_file'])}' class='log-link'>Лог</a>"
 
         rows.append(
             f"      <tr>\n"

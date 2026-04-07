@@ -28,8 +28,8 @@ from shared.infra.step_results import StepResult
 
 def _project_root() -> str:
     """Корень проекта: shared/infra/test_runner.py → ../../.."""
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))))
+    return os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +248,7 @@ class CaseRunner:
         print(f"RUN_DIR={self.run_dir}")
         print(f"STATUS={overall}")
         print(f"VERDICT={self.decision['verdict']}")
+        print(f"REPORT_HTML={os.path.join(self.run_dir, 'report.html')}")
         print(f"ENVIRONMENT={self.env['os_name']} "
               f"{self.env['architecture']} "
               f"{self.env['screen_resolution']}")
