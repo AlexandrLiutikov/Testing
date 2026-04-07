@@ -19,6 +19,19 @@ class WindowsDriver(BaseDriver):
     - UIAutomationClient (PowerShell) для обнаружения модальных диалогов
     """
 
+    # Видимые подписи пунктов левого меню стартового экрана.
+    # Ключ — внутренний идентификатор, значение — список возможных
+    # пользовательских названий (локализация/варианты сборок), по которым
+    # ищут Accessibility API и OCR. Coordinate fallback использует ключ.
+    _MENU_LABELS = {
+        "home":      ["Главная", "Home"],
+        "templates": ["Шаблоны", "Templates"],
+        "local":     ["Локальные файлы", "Локальные", "Local Files", "Local"],
+        "collab":    ["Совместная", "Совместная работа", "Collaboration"],
+        "settings":  ["Настройки", "Settings"],
+        "about":     ["О программе", "О приложении", "About"],
+    }
+
     # ---------------------------------------------------------------
     # Window management
     # ---------------------------------------------------------------
@@ -81,21 +94,23 @@ class WindowsDriver(BaseDriver):
     # ---------------------------------------------------------------
 
     def click_menu_item(self, pid: int, menu_name: str) -> bool:
-        """Кликнуть по пункту меню с fallback цепочкой.
+        """Кликнуть по пункту левого меню стартового экрана с fallback цепочкой.
+
+        ВАЖНО: левое меню R7 Editors — часть CEF-поверхности, и
+        Accessibility API выдаёт неоднозначные совпадения по имени
+        (та же подпись встречается на карточках в центральной области,
+        напр. «Шаблоны»). Поэтому для пунктов левого меню путь
+        Accessibility отключён: первичный путь — OCR, ограниченный
+        областью сайдбара.
 
         Порядок fallback:
-        1. Accessibility API (UIAutomation) — поиск элемента по имени
-        2. OCR скриншота + клик по координатам текста
+        1. (пропущен для CEF-сайдбара) Accessibility API
+        2. OCR скриншота (сайдбар) + клик по координатам текста
         3. Координатный клик (крайний резерв, логируется)
         4. Computer Vision (заглушка для будущего расширения)
         """
-        # Fallback 1: Accessibility API
-        try:
-            if self._click_via_accessibility(pid, menu_name):
-                logger.info(f"click_menu_item: '{menu_name}' — клик через Accessibility API")
-                return True
-        except Exception as e:
-            logger.warning(f"click_menu_item: Accessibility API недоступен для '{menu_name}': {e}")
+        # Fallback 1: Accessibility API — отключено для сайдбара CEF (см. docstring).
+        # Путь оставлен в классе и доступен для других меню, но не вызывается здесь.
 
         # Fallback 2: OCR
         try:
@@ -128,7 +143,16 @@ class WindowsDriver(BaseDriver):
         return False
 
     def _click_via_accessibility(self, pid: int, menu_name: str) -> bool:
-        """Попытка клика через UIAutomation API (PowerShell)."""
+        """Попытка клика через UIAutomation API (PowerShell).
+
+        Ищет элемент UIA по всем известным подписям (`_MENU_LABELS`) —
+        т.к. `menu_name` это внутренний ключ, а не то, что видит пользователь.
+        """
+        labels = self._MENU_LABELS.get(menu_name, [menu_name])
+        # Безопасная сериализация в литерал PS-массива.
+        ps_labels = ", ".join(
+            "'{}'".format(lbl.replace("'", "''")) for lbl in labels
+        )
         ps = f"""
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -AssemblyName UIAutomationClient
@@ -137,21 +161,24 @@ Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::RootElement
 $pidCond = New-Object System.Windows.Automation.PropertyCondition(
     [System.Windows.Automation.AutomationElement]::ProcessIdProperty, {pid})
+$labels = @({ps_labels})
 
 $dl = (Get-Date).AddSeconds(5)
 while ((Get-Date) -lt $dl) {{
     $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pidCond)
     foreach ($w in $wins) {{
-        $nameCond = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::NameProperty, "{menu_name}")
-        $elem = $w.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCond)
-        if ($elem) {{
-            try {{
-                $ip = $elem.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                $ip.Invoke()
-                Write-Output "CLICKED"
-                exit
-            }} catch {{}}
+        foreach ($lbl in $labels) {{
+            $nameCond = New-Object System.Windows.Automation.PropertyCondition(
+                [System.Windows.Automation.AutomationElement]::NameProperty, $lbl)
+            $elem = $w.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $nameCond)
+            if ($elem) {{
+                try {{
+                    $ip = $elem.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+                    $ip.Invoke()
+                    Write-Output "CLICKED"
+                    exit
+                }} catch {{}}
+            }}
         }}
     }}
     Start-Sleep -Milliseconds 300
@@ -171,7 +198,7 @@ Write-Output "NOTFOUND"
     def _click_via_ocr(self, pid: int, menu_name: str) -> bool:
         """Попытка клика через OCR скриншота."""
         from shared.infra.screenshots import take_screenshot
-        from shared.infra.ocr import ocr_image, find_token_position
+        from shared.infra.ocr import ocr_image, find_token_position, find_token_bbox
 
         hwnd = self._get_hwnd_from_pid(pid)
         if not hwnd:
@@ -192,22 +219,41 @@ Write-Output "NOTFOUND"
         width = right - left
         height = bottom - top
 
-        # Скриншот всей области и обрезка через PIL
+        # Сайдбар стартового экрана занимает ~первые 15% ширины окна.
+        # Ограничиваем OCR этой полосой — у левого меню так исчезает
+        # неоднозначность с одноимёнными элементами в центральной области
+        # (напр. карточка «Шаблоны»), которая ломала семантический клик.
+        sidebar_frac = 0.15
+        sidebar_w = max(1, int(width * sidebar_frac))
+
         try:
             from PIL import ImageGrab
             full_shot = ImageGrab.grab()
-            window_shot = full_shot.crop((left, top, right, bottom))
-            window_shot.save(screenshot_path)
+            sidebar_shot = full_shot.crop((left, top, left + sidebar_w, bottom))
+            sidebar_shot.save(screenshot_path)
+            ocr_width = sidebar_w
+            ocr_height = height
         except ImportError:
-            # Fallback: полный скриншот
+            # Fallback: полный скриншот окна, OCR без кропа.
             take_screenshot(screenshot_path)
+            ocr_width = width
+            ocr_height = height
 
-        # OCR
-        ocr_text = ocr_image(screenshot_path)
-        
-        # Найти позицию токена
+        # Сначала пробуем точные bbox'ы через Tesseract TSV,
+        # потом — старый грубый поиск по распределению строк.
+        labels = self._MENU_LABELS.get(menu_name, [menu_name])
+        pos = None
         try:
-            pos = find_token_position(ocr_text, menu_name, width, height)
+            for lbl in labels:
+                pos = find_token_bbox(screenshot_path, lbl)
+                if pos:
+                    break
+            if pos is None:
+                ocr_text = ocr_image(screenshot_path)
+                for lbl in labels:
+                    pos = find_token_position(ocr_text, lbl, ocr_width, ocr_height)
+                    if pos:
+                        break
             if pos:
                 # Клик по найденным координатам
                 abs_x = left + pos['center_x']
