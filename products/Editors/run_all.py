@@ -36,6 +36,7 @@ from shared.infra.environment import collect_environment, platform_tag
 CASE_SCRIPTS = {
     "1": os.path.join("scenarios", "smoke", "1_Запуск_редактора.py"),
     "2": os.path.join("scenarios", "smoke", "2_Главное_окно_редактора.py"),
+    "3": os.path.join("scenarios", "smoke", "3_Создание_документа_и_проверка_вкладок.py"),
 }
 
 AVAILABLE_CASES = sorted(CASE_SCRIPTS.keys())
