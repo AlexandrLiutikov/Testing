@@ -352,15 +352,16 @@ def main():
             driver.activate_window(pid)
             home_ok, _ = assert_section_visible(
                 shot6,
-                ["Создавайте", "новые", "файлы", "Документ", "Таблица", "Презентация"],
+                ["Главная", "Последние", "файлы", "Документ", "Таблица", "Презентация"],
                 need=3,
             )
-            title_absent, _ = assert_text_absent(
+            recent_name = Path(saved_path["value"]).name if saved_path["value"] else "Документ1.docx"
+            recent_ok, _ = assert_section_visible(
                 shot6,
-                ["Документ1.docx", "Document1.docx", "*Документ1.docx", "*Document1.docx"],
-                max_found=0,
+                [recent_name, "Документ1.docx", "Document1.docx"],
+                need=1,
             )
-            last_ok = home_ok and title_absent
+            last_ok = home_ok and recent_ok
             return last_ok
 
         post_ok = False
@@ -376,17 +377,23 @@ def main():
             runner,
             step_num=6,
             step_name="Закрыть вкладку документа",
-            expected="Вкладка закрыта, отображается главное окно редактора",
+            expected=(
+                "Вкладка закрыта, отображается главное окно редактора, "
+                "сохранённый документ есть в списке последних файлов"
+            ),
             severity="HIGH",
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot6)
             step.check(
                 condition=post_ok,
-                pass_msg="Вкладка документа закрыта, отображается главное окно редактора",
+                pass_msg=(
+                    "Вкладка документа закрыта, открыт главный экран, "
+                    "сохранённый файл отображается в списке последних"
+                ),
                 fail_msg=(
                     "Не удалось выполнить клик по UI-кнопке закрытия вкладки "
-                    "или подтвердить возврат на главное окно редактора"
+                    "или подтвердить главный экран со списком последних файлов"
                 ),
             )
 
