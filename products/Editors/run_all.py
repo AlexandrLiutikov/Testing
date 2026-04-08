@@ -5,7 +5,7 @@
 и формирует сводный отчёт с RELEASE_DECISION.
 
 Использование:
-    python run_all.py                         # кейсы 1,2 (по умолчанию)
+    python run_all.py                         # кейсы 1-4 (по умолчанию)
     python run_all.py --cases 1 2             # только кейсы 1 и 2
     python run_all.py --cases 1 2 --editor-path "C:\\path\\to\\editors.exe"
 """
@@ -37,6 +37,7 @@ CASE_SCRIPTS = {
     "1": os.path.join("scenarios", "smoke", "1_Запуск_редактора.py"),
     "2": os.path.join("scenarios", "smoke", "2_Главное_окно_редактора.py"),
     "3": os.path.join("scenarios", "smoke", "3_Создание_документа_и_проверка_вкладок.py"),
+    "4": os.path.join("scenarios", "smoke", "4_Ввод_текста_в_редакторе_документов.py"),
 }
 
 AVAILABLE_CASES = sorted(CASE_SCRIPTS.keys())
