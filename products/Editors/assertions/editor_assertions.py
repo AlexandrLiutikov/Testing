@@ -8,7 +8,7 @@ Assertions — это проверяющие функции, которые:
 
 from typing import List, Optional, Tuple
 
-from shared.infra.ocr import has_tokens, ocr_image
+from shared.infra.ocr import has_tokens, ocr_image, find_token_bbox
 from shared.infra.screenshots import take_screenshot
 from shared.infra.waits import wait_main_proc
 
@@ -136,3 +136,34 @@ def assert_document_created(
     take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
     return has_tokens(ocr_text, tokens, need)
+
+
+def assert_text_entered_and_left_aligned(
+    screenshot_path: str,
+    tokens: List[str],
+    need: int = 2,
+    anchor_token: str = "Задача",
+    max_left_ratio: float = 0.35,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что текст введён и начало абзаца расположено у левого поля.
+
+    Критерий:
+    1) В OCR-тексте найдено минимум `need` токенов ожидаемого текста.
+    2) Якорный токен (`anchor_token`) найден на скриншоте и его координата X
+       находится в левой части страницы (<= max_left_ratio * width).
+    """
+    from PIL import Image
+
+    take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+    text_ok, found = has_tokens(ocr_text, tokens, need)
+    if not text_ok:
+        return False, found
+
+    bbox = find_token_bbox(screenshot_path, anchor_token)
+    if not bbox:
+        return False, found
+
+    image_width = Image.open(screenshot_path).size[0]
+    left_aligned = bbox["left"] <= int(image_width * max_left_ratio)
+    return left_aligned, found
