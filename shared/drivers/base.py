@@ -70,6 +70,28 @@ class BaseDriver(ABC):
             "align_paragraph_left не реализован для текущей платформы"
         )
 
+    def undo_action(self, pid: int) -> None:
+        """Отменить последнее действие (обычно Ctrl+Z)."""
+        raise NotImplementedError("undo_action не реализован для текущей платформы")
+
+    def redo_action(self, pid: int) -> None:
+        """Повторить отменённое действие (обычно Ctrl+Y)."""
+        raise NotImplementedError("redo_action не реализован для текущей платформы")
+
+    def save_document(self, pid: int) -> None:
+        """Вызвать сохранение документа (обычно Ctrl+S)."""
+        raise NotImplementedError("save_document не реализован для текущей платформы")
+
+    def confirm_dialog(self, pid: int) -> None:
+        """Подтвердить активный диалог клавишей Enter."""
+        raise NotImplementedError("confirm_dialog не реализован для текущей платформы")
+
+    def close_current_tab(self, pid: int) -> None:
+        """Закрыть текущую вкладку редактора (обычно Ctrl+F4)."""
+        raise NotImplementedError(
+            "close_current_tab не реализован для текущей платформы"
+        )
+
     # ------------------------------------------------------------------
     # Window geometry (нужен для координатных кликов)
     # ------------------------------------------------------------------
