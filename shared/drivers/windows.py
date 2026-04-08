@@ -370,6 +370,36 @@ Write-Output "NOTFOUND"
         self._send_ctrl_combo(0x4C)  # L
         time.sleep(0.3)
 
+    def undo_action(self, pid: int) -> None:
+        """Отменить последнее действие (Ctrl+Z)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x5A)  # Z
+        time.sleep(0.3)
+
+    def redo_action(self, pid: int) -> None:
+        """Повторить отменённое действие (Ctrl+Y)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x59)  # Y
+        time.sleep(0.3)
+
+    def save_document(self, pid: int) -> None:
+        """Открыть диалог сохранения документа (Ctrl+S)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x53)  # S
+        time.sleep(0.4)
+
+    def confirm_dialog(self, pid: int) -> None:
+        """Подтвердить активный диалог клавишей Enter."""
+        self.activate_window(pid)
+        self._tap_key(0x0D)  # Enter
+        time.sleep(0.5)
+
+    def close_current_tab(self, pid: int) -> None:
+        """Закрыть текущую вкладку документа (Ctrl+F4)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x73)  # F4
+        time.sleep(0.4)
+
     # ---------------------------------------------------------------
     # Modal / warning detection (UIAutomation через PowerShell)
     # ---------------------------------------------------------------
