@@ -60,6 +60,16 @@ class BaseDriver(ABC):
         """Эмулировать нажатие клавиши Escape в окне процесса *pid*."""
         ...
 
+    def paste_text(self, pid: int, text: str) -> None:
+        """Вставить текст в активный редактор через системный буфер обмена."""
+        raise NotImplementedError("paste_text не реализован для текущей платформы")
+
+    def align_paragraph_left(self, pid: int) -> None:
+        """Выровнять абзац по левому краю (обычно hotkey Ctrl+L)."""
+        raise NotImplementedError(
+            "align_paragraph_left не реализован для текущей платформы"
+        )
+
     # ------------------------------------------------------------------
     # Window geometry (нужен для координатных кликов)
     # ------------------------------------------------------------------

@@ -42,6 +42,26 @@ def dismiss_collab_popup(pid: int):
     driver.send_escape(pid)
 
 
+def type_document_text(pid: int, text: str, align_left: bool = False):
+    """Ввести текст в область документа и при необходимости выровнять влево.
+
+    Action-only: выполняет фокус на холсте документа, вставляет текст через
+    буфер обмена и (опционально) применяет выравнивание абзаца влево.
+    PASS/FAIL не выставляет — подтверждение выполняется assertion-слоем.
+    """
+    driver = get_driver()
+    driver.activate_window(pid)
+
+    # FALLBACK: у CEF-холста нет стабильного accessibility-id, поэтому
+    # фокусируем рабочую область относительным кликом по центру страницы.
+    driver.click_rel(pid, 0.50, 0.45)
+    time.sleep(0.2)
+
+    driver.paste_text(pid, text)
+    if align_left:
+        driver.align_paragraph_left(pid)
+
+
 _DOC_LABELS = {
     "document":     "Документ",
     "spreadsheet":  "Таблица",

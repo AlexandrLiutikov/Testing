@@ -353,15 +353,22 @@ Write-Output "NOTFOUND"
         time.sleep(0.5)
 
     def send_escape(self, pid: int) -> None:
-        import ctypes
-
         self.activate_window(pid)
-        VK_ESCAPE = 0x1B
-        KEYEVENTF_KEYUP = 0x0002
-        ctypes.windll.user32.keybd_event(VK_ESCAPE, 0, 0, 0)
-        time.sleep(0.05)
-        ctypes.windll.user32.keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, 0)
+        self._tap_key(0x1B)
         time.sleep(1)
+
+    def paste_text(self, pid: int, text: str) -> None:
+        """Вставить текст в активное окно через системный буфер обмена."""
+        self.activate_window(pid)
+        self._set_clipboard_text(text)
+        self._send_ctrl_combo(0x56)  # V
+        time.sleep(0.3)
+
+    def align_paragraph_left(self, pid: int) -> None:
+        """Выровнять текущий абзац по левому краю (Ctrl+L)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x4C)  # L
+        time.sleep(0.3)
 
     # ---------------------------------------------------------------
     # Modal / warning detection (UIAutomation через PowerShell)
@@ -456,3 +463,46 @@ Write-Output "FALLBACK"
     @staticmethod
     def launch_editor(editor_path: str) -> None:
         subprocess.Popen([editor_path])
+
+    # ---------------------------------------------------------------
+    # Keyboard / clipboard helpers
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _tap_key(vk_code: int, pause_sec: float = 0.05) -> None:
+        import ctypes
+
+        KEYEVENTF_KEYUP = 0x0002
+        ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
+        time.sleep(pause_sec)
+        ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+
+    @staticmethod
+    def _send_ctrl_combo(key_vk: int, pause_sec: float = 0.05) -> None:
+        import ctypes
+
+        VK_CONTROL = 0x11
+        KEYEVENTF_KEYUP = 0x0002
+
+        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, 0, 0)
+        time.sleep(pause_sec)
+        ctypes.windll.user32.keybd_event(key_vk, 0, 0, 0)
+        time.sleep(pause_sec)
+        ctypes.windll.user32.keybd_event(key_vk, 0, KEYEVENTF_KEYUP, 0)
+        time.sleep(pause_sec)
+        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+    @staticmethod
+    def _set_clipboard_text(text: str) -> None:
+        safe_text = text.replace("'@", "' '@")
+        ps = (
+            "$clip = @'\n"
+            f"{safe_text}\n"
+            "'@; Set-Clipboard -Value $clip"
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
