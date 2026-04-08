@@ -110,6 +110,11 @@ def click_toolbar_tab(pid: int, tab_name: str, positions: dict):
         tab_name: имя вкладки (например, "Главная", "Вставка")
         positions: dict {tab_name: (rel_x, rel_y)} от calibrate_toolbar_tabs().
             Хардкод координат запрещён — словарь обязателен.
+
+    Fallback:
+        Если вкладка отсутствует в positions (неполная OCR-калибровка),
+        выполняется on-demand OCR-клик по имени вкладки на свежем скриншоте.
+        Ошибка поднимается только если fallback не смог найти вкладку.
     """
     coords = positions.get(tab_name) if positions else None
     if not coords:
