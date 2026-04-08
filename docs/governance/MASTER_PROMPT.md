@@ -24,11 +24,11 @@
 | # | Файл | Что содержит |
 |---|---|---|
 | 1 | `AGENTS.md` | Философия, приоритеты, формат ответа |
-| 2 | `GIT_DISCIPLINE.md` | Обязательный регламент работы с Git |
+| 2 | `docs/governance/GIT_DISCIPLINE.md` | Обязательный регламент работы с Git |
 | 3 | `products/<Продукт>/RISK_MODEL.md` | Модель рисков продукта (для Editors → `products/Editors/RISK_MODEL.md`) |
-| 4 | `DECISION_ENGINE.md` | Алгоритм принятия решения о релизе (общий, в корне проекта) |
-| 5 | `SCRIPT_RULES.md` | Правила написания Python-скриптов |
-| 6 | `REPORT_STYLE_RULES.md` | Стандарт оформления HTML/MD/JSON отчётов |
+| 4 | `products/<Продукт>/DECISION_ENGINE.md` | Алгоритм принятия решения о релизе (для Editors → `products/Editors/DECISION_ENGINE.md`) |
+| 5 | `docs/methodology/SCRIPT_RULES.md` | Правила написания Python-скриптов |
+| 6 | `docs/methodology/REPORT_STYLE_RULES.md` | Стандарт оформления HTML/MD/JSON отчётов |
 
 **Если какой-то файл недоступен** — останови работу, сообщи пользователю, предложи восстановить.
 
@@ -36,11 +36,11 @@
 
 1. Явное указание пользователя
 2. `AGENTS.md`
-3. `GIT_DISCIPLINE.md`
-4. `<Продукт>/<ПРОДУКТ>_RISK_MODEL.md`
-5. `DECISION_ENGINE.md`
-6. `SCRIPT_RULES.md`
-7. `REPORT_STYLE_RULES.md`
+3. `docs/governance/GIT_DISCIPLINE.md`
+4. `<Продукт>/RISK_MODEL.md`
+5. `<Продукт>/DECISION_ENGINE.md`
+6. `docs/methodology/SCRIPT_RULES.md`
+7. `docs/methodology/REPORT_STYLE_RULES.md`
 
 ---
 
@@ -114,7 +114,7 @@
 | `CRITICAL` | Крэш, потеря данных, невозможность запуска → **NO_GO** |
 | `HIGH` | Основная функция не работает → **NO_GO** |
 | `MEDIUM` | Функция работает с ограничениями → **GO_WITH_RISK** |
-| `LOW` | Косметика, незначительные UI-отклонения → **GO** |
+| `LOW` | Косметика, незначительные UI-отклонения, указать эти отклонения → **GO** |
 
 Для `BLOCKED` severity = `null` (не применимо).
 
@@ -179,7 +179,7 @@ step_result["failure_detail"]   = "Описание на русском язык
 | `DEGRADED` | > 20% но ≤ 50%, или 1 critical path не покрыт | GO_WITH_RISK, прогон неполный |
 | `INSUFFICIENT` | > 50%, или ≥ 2 critical paths не покрыты | Решение не может быть принято |
 
-Подробности — в `DECISION_ENGINE.md`, раздел 9.
+Подробности — в `products/<продукт>/DECISION_ENGINE.md`, раздел 9.
 
 ---
 
@@ -200,7 +200,7 @@ step_result["failure_detail"]   = "Описание на русском язык
 
 ## 7. Правила написания скриптов
 
-> **Полные правила** → `SCRIPT_RULES.md`. Прочитай перед написанием любого скрипта.
+> **Полные правила** → `docs/methodology/SCRIPT_RULES.md`. Прочитай перед написанием любого скрипта.
 
 Здесь — только то, что критично помнить всегда:
 
@@ -237,7 +237,7 @@ step_result["failure_detail"]   = "Описание на русском язык
 
 ## 8. Правила оформления отчётов
 
-> **Полные правила** → `REPORT_STYLE_RULES.md`. Прочитай перед формированием отчёта.
+> **Полные правила** → `docs/methodology/REPORT_STYLE_RULES.md`. Прочитай перед формированием отчёта.
 
 Здесь — только то, что критично помнить всегда:
 
@@ -296,8 +296,8 @@ RECOMMENDATION:
 
 ```
 Testing/
-  MASTER_PROMPT.md         ← этот файл
-  docs/governance/         ← философия и приоритеты (AGENTS.md и др.)
+  AGENTS.md                ← этот файл
+  docs/governance/         ← философия и приоритеты (RULES.md и др.)
   docs/methodology/        ← правила скриптов и отчётов
   docs/reporting/          ← report.css, шаблоны
   tools/                   ← setup_env.py, bootstrap.py и др.
@@ -371,10 +371,10 @@ PHASE 1 — CONTEXT LOADING
 Ты обязан загрузить и применить:
 
 - AGENTS.md
-- <Продукт>/<ПРОДУКТ>_RISK_MODEL.md
-- DECISION_ENGINE.md
-- SCRIPT_RULES.md
-- REPORT_STYLE_RULES.md
+- products/<Продукт>/RISK_MODEL.md
+- products/<Продукт>/DECISION_ENGINE.md
+- docs/methodology/SCRIPT_RULES.md
+- docs/methodology/REPORT_STYLE_RULES.md
 
 Если любой файл недоступен:
 → остановка
