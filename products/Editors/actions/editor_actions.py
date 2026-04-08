@@ -62,6 +62,31 @@ def type_document_text(pid: int, text: str, align_left: bool = False):
         driver.align_paragraph_left(pid)
 
 
+def undo_last_action(pid: int):
+    """Выполнить команду «Отменить» для активного документа."""
+    get_driver().undo_action(pid)
+
+
+def redo_last_action(pid: int):
+    """Выполнить команду «Повторить» для активного документа."""
+    get_driver().redo_action(pid)
+
+
+def save_active_document(pid: int):
+    """Выполнить команду «Сохранить» для активного документа."""
+    get_driver().save_document(pid)
+
+
+def confirm_active_dialog(pid: int):
+    """Подтвердить активный системный диалог клавишей Enter."""
+    get_driver().confirm_dialog(pid)
+
+
+def close_active_document_tab(pid: int):
+    """Закрыть текущую вкладку документа."""
+    get_driver().close_current_tab(pid)
+
+
 _DOC_LABELS = {
     "document":     "Документ",
     "spreadsheet":  "Таблица",
