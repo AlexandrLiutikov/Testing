@@ -143,12 +143,20 @@ def main():
                 pid=pid,
             )
             doc_tokens = ["Междустрочный", "Множитель", "Страница", "Количество"]
-            wait_until(
-                lambda: assert_document_created(s1_path, tokens=doc_tokens, need=2)[0],
+            last_probe_ok = False
+
+            def probe_document_created() -> bool:
+                nonlocal last_probe_ok
+                driver.activate_window(pid)
+                last_probe_ok, _ = assert_document_created(s1_path, tokens=doc_tokens, need=2)
+                return last_probe_ok
+
+            ready = wait_until(
+                probe_document_created,
                 timeout_sec=10,
                 poll_interval=1.0,
             )
-            created_ok, _ = assert_document_created(s1_path, tokens=doc_tokens, need=2)
+            created_ok = ready and last_probe_ok
 
             if created_ok:
                 runner.add_step(
