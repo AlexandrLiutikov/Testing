@@ -8,6 +8,8 @@ OCR (`shared.infra.ocr.find_token_bbox`) на свежем скриншоте о
 """
 
 import time
+import tempfile
+import os as _os
 
 from shared.drivers import get_driver
 from shared.infra.screenshots import take_screenshot
@@ -111,6 +113,10 @@ def click_toolbar_tab(pid: int, tab_name: str, positions: dict):
     """
     coords = positions.get(tab_name) if positions else None
     if not coords:
+        # FALLBACK: если вкладка не попала в первичную калибровку, пробуем
+        # свежий OCR-клик по имени вкладки прямо перед действием.
+        if _ocr_click_toolbar_tab(pid, tab_name):
+            return
         raise RuntimeError(
             f"Координаты вкладки «{tab_name}» не откалиброваны. "
             f"Перед кликом вызовите calibrate_toolbar_tabs()."
@@ -135,6 +141,24 @@ _TAB_QUERIES = {
     "Вид": "Вид",
     "Плагины": "Плагины",
 }
+
+
+def _ocr_click_toolbar_tab(pid: int, tab_name: str) -> bool:
+    """Клик по вкладке ленты через OCR на свежем скриншоте (fallback)."""
+    query = _TAB_QUERIES.get(tab_name)
+    if not query:
+        return False
+
+    fd, screenshot_path = tempfile.mkstemp(prefix="toolbar_", suffix=".png")
+    _os.close(fd)
+    try:
+        take_screenshot(screenshot_path)
+        return _ocr_click_label(pid, screenshot_path, query)
+    finally:
+        try:
+            _os.remove(screenshot_path)
+        except OSError:
+            pass
 
 
 def calibrate_toolbar_tabs(screenshot_path: str) -> dict:
