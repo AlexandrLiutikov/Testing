@@ -108,7 +108,7 @@ def main():
         driver = get_driver()
         pid = None
         try:
-            pid = wait_main_proc("editors", 20)
+            pid = wait_main_proc("editors", 3)
             if not pid:
                 shot = capture_step(runner.run_dir, 0, "no_editor")
                 runner.add_step(
@@ -130,7 +130,7 @@ def main():
             step_timer = DurationTimer()
             create_document(pid, "document")
 
-            new_pid = wait_main_proc("editors", 10)
+            new_pid = wait_main_proc("editors", 3)
             if new_pid:
                 pid = new_pid
                 driver.activate_window(pid)
