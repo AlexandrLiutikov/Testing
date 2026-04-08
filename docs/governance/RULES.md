@@ -1,4 +1,4 @@
-# AGENTS.md
+# RULES.md
 
 Общие правила для Codex и любых других агентов в проекте `D:\Projects\Testing`.
 
