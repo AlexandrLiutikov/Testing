@@ -59,6 +59,18 @@ def _write_artefacts(
     md_path = os.path.join(run_dir, "report.md")
     html_path = os.path.join(run_dir, "report.html")
 
+    test_failed = sum(
+        1
+        for s in steps
+        if s["status"] == "FAIL" and s.get("failure_type", "TEST_FAIL") == "TEST_FAIL"
+    )
+    infra_failed = sum(
+        1
+        for s in steps
+        if s["status"] == "FAIL" and s.get("failure_type") == "INFRA_FAIL"
+    )
+    blocked = sum(1 for s in steps if s["status"] == "BLOCKED")
+
     results_data = {
         "environment": env,
         "case_meta": {"case_name": case_name},
@@ -66,7 +78,9 @@ def _write_artefacts(
         "summary": {
             "total": len(steps),
             "passed": sum(1 for s in steps if s["status"] == "PASS"),
-            "failed": sum(1 for s in steps if s["status"] == "FAIL"),
+            "failed": test_failed,
+            "infra_failed": infra_failed,
+            "blocked": blocked,
         },
         "release_decision": decision,
     }
