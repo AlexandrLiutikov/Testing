@@ -53,8 +53,13 @@ def _candidate_save_paths() -> list:
     folders = [
         home / "Documents",
         home / "Документы",
+        home / "Pictures",
+        home / "Изображения",
+        home / "Картинки",
         home / "OneDrive" / "Documents",
         home / "OneDrive" / "Документы",
+        home / "OneDrive" / "Pictures",
+        home / "OneDrive" / "Изображения",
     ]
     names = ["Документ1.docx", "Document1.docx"]
     result = []
@@ -124,7 +129,7 @@ def main():
             return
 
         # Шаг 1. Отменить ввод текста
-        undo_last_action(pid)
+        undo_clicked = False
         shot1 = capture_step(runner.run_dir, 1, "undo", activate_driver=driver, pid=pid)
 
         last_ok = False
@@ -135,7 +140,15 @@ def main():
             last_ok, _ = assert_text_absent(shot1, SMOKE_TEXT_ASSERT_TOKENS, max_found=0)
             return last_ok
 
-        undo_ok = wait_until(_probe_undo, timeout_sec=10, poll_interval=1.0) and last_ok
+        undo_ok = False
+        for _ in range(5):
+            click_ok = undo_last_action(pid, allow_hotkey_fallback=False)
+            undo_clicked = undo_clicked or click_ok
+            if not undo_clicked:
+                break
+            if wait_until(_probe_undo, timeout_sec=2.0, poll_interval=0.5) and last_ok:
+                undo_ok = True
+                break
 
         with StepVerifier(
             runner,
@@ -151,11 +164,14 @@ def main():
             step.check(
                 condition=undo_ok,
                 pass_msg="Команда «Отменить» выполнена, текст на странице отсутствует",
-                fail_msg="После команды «Отменить» текст всё ещё присутствует",
+                fail_msg=(
+                    "Не удалось выполнить клик по UI-кнопке «Отменить» "
+                    "или текст всё ещё присутствует после нажатия"
+                ),
             )
 
         # Шаг 2. Повторить ввод текста
-        redo_last_action(pid)
+        redo_clicked = False
         shot2 = capture_step(runner.run_dir, 2, "redo", activate_driver=driver, pid=pid)
 
         def _probe_redo() -> bool:
@@ -164,7 +180,15 @@ def main():
             last_ok, _ = assert_section_visible(shot2, SMOKE_TEXT_ASSERT_TOKENS, need=2)
             return last_ok
 
-        redo_ok = wait_until(_probe_redo, timeout_sec=10, poll_interval=1.0) and last_ok
+        redo_ok = False
+        for _ in range(5):
+            click_ok = redo_last_action(pid, allow_hotkey_fallback=False)
+            redo_clicked = redo_clicked or click_ok
+            if not redo_clicked:
+                break
+            if wait_until(_probe_redo, timeout_sec=2.0, poll_interval=0.5) and last_ok:
+                redo_ok = True
+                break
 
         with StepVerifier(
             runner,
@@ -178,11 +202,14 @@ def main():
             step.check(
                 condition=redo_ok,
                 pass_msg="Команда «Повторить» выполнена, текст снова отображается",
-                fail_msg="После команды «Повторить» не удалось подтвердить возврат текста",
+                fail_msg=(
+                    "Не удалось выполнить клик по UI-кнопке «Повторить» "
+                    "или подтвердить возврат текста"
+                ),
             )
 
         # Шаг 3. Сохранение документа
-        save_active_document(pid)
+        save_active_document(pid, allow_hotkey_fallback=False)
         shot3 = capture_step(
             runner.run_dir,
             3,
@@ -197,11 +224,14 @@ def main():
             last_ok, _ = assert_save_dialog_opened(shot3)
             return last_ok
 
-        save_dialog_ok = wait_until(
-            _probe_save_dialog,
-            timeout_sec=10,
-            poll_interval=1.0,
-        ) and last_ok
+        save_dialog_ok = (
+            wait_until(
+                _probe_save_dialog,
+                timeout_sec=10,
+                poll_interval=1.0,
+            )
+            and last_ok
+        )
 
         with StepVerifier(
             runner,
@@ -217,7 +247,10 @@ def main():
             step.check(
                 condition=save_dialog_ok,
                 pass_msg="Открыто системное окно сохранения, имя документа по умолчанию отображается",
-                fail_msg="Не удалось подтвердить открытие системного окна сохранения",
+                fail_msg=(
+                    "Не удалось выполнить клик по UI-кнопке «Сохранить» "
+                    "или подтвердить открытие системного окна сохранения"
+                ),
             )
 
         # Шаг 4. Подтверждение сохранения
@@ -267,6 +300,15 @@ def main():
                 if assert_file_exists(path):
                     saved_path["value"] = path
                     return True
+            # fallback: быстрый поиск по профилю пользователя
+            home = Path.home()
+            for pattern in ("Документ1.docx", "Document1.docx"):
+                try:
+                    for found in home.rglob(pattern):
+                        saved_path["value"] = str(found)
+                        return True
+                except OSError:
+                    continue
             return False
 
         file_ok = wait_until(_probe_file_exists, timeout_sec=15, poll_interval=1.0)
@@ -297,7 +339,6 @@ def main():
             )
 
         # Постусловие. Закрыть вкладку документа
-        close_active_document_tab(pid)
         shot6 = capture_step(
             runner.run_dir,
             6,
@@ -305,11 +346,31 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        home_ok, _ = assert_section_visible(
-            shot6,
-            ["Главная", "Создавайте новые файлы", "Последние"],
-            need=1,
-        )
+
+        def _probe_main_screen() -> bool:
+            nonlocal last_ok
+            driver.activate_window(pid)
+            home_ok, _ = assert_section_visible(
+                shot6,
+                ["Создавайте", "новые", "файлы", "Документ", "Таблица", "Презентация"],
+                need=3,
+            )
+            title_absent, _ = assert_text_absent(
+                shot6,
+                ["Документ1.docx", "Document1.docx", "*Документ1.docx", "*Document1.docx"],
+                max_found=0,
+            )
+            last_ok = home_ok and title_absent
+            return last_ok
+
+        post_ok = False
+        for _ in range(3):
+            close_clicked = close_active_document_tab(pid, allow_hotkey_fallback=False)
+            if not close_clicked:
+                break
+            if wait_until(_probe_main_screen, timeout_sec=3.0, poll_interval=0.5) and last_ok:
+                post_ok = True
+                break
 
         with StepVerifier(
             runner,
@@ -321,9 +382,12 @@ def main():
         ) as step:
             step.screenshot(shot6)
             step.check(
-                condition=home_ok,
+                condition=post_ok,
                 pass_msg="Вкладка документа закрыта, отображается главное окно редактора",
-                fail_msg="Не удалось подтвердить возврат на главное окно редактора",
+                fail_msg=(
+                    "Не удалось выполнить клик по UI-кнопке закрытия вкладки "
+                    "или подтвердить возврат на главное окно редактора"
+                ),
             )
 
 

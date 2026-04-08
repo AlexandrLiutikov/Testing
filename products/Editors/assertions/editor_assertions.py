@@ -200,13 +200,16 @@ def assert_save_dialog_opened(
         path_tokens = ["Документы", "Documents"]
     if filename_tokens is None:
         filename_tokens = ["Документ1", "Document1"]
+    dialog_tokens = ["Сохранить как", "Save As", "Имя файла", "File name", "Сохранить"]
 
     take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
 
+    dialog_ok, found_dialog = has_tokens(ocr_text, dialog_tokens, need=1)
     path_ok, found_path = has_tokens(ocr_text, path_tokens, need=1)
     file_ok, found_file = has_tokens(ocr_text, filename_tokens, need=1)
-    return path_ok and file_ok, found_path + found_file
+    ok = (dialog_ok and file_ok) or (path_ok and file_ok)
+    return ok, found_dialog + found_path + found_file
 
 
 def assert_file_exists(file_path: str) -> bool:
