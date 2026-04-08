@@ -190,9 +190,9 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
         # Делаем несколько точек рядом с крестиком вкладки, чтобы не попасть
         # в центральный заголовок документа.
         rel_points = [
-            (0.176, 0.017),
-            (0.183, 0.017),
-            (0.170, 0.017),
+            (0.166, 0.017),
+            (0.160, 0.017),
+            (0.172, 0.017),
         ]
         for rel_x, rel_y in rel_points:
             target_x = int(rel_x * width)

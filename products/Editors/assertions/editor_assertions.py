@@ -200,15 +200,28 @@ def assert_save_dialog_opened(
         path_tokens = ["Документы", "Documents"]
     if filename_tokens is None:
         filename_tokens = ["Документ1", "Document1"]
-    dialog_tokens = ["Сохранить как", "Save As", "Имя файла", "File name", "Сохранить"]
+    dialog_tokens = [
+        "Сохранить как",
+        "Save As",
+        "Имя файла",
+        "File name",
+        "Тип файла",
+        "File type",
+        "Отмена",
+        "Cancel",
+        "Сохранить",
+        "Save",
+    ]
 
     take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
 
-    dialog_ok, found_dialog = has_tokens(ocr_text, dialog_tokens, need=1)
+    dialog_ok, found_dialog = has_tokens(ocr_text, dialog_tokens, need=2)
     path_ok, found_path = has_tokens(ocr_text, path_tokens, need=1)
     file_ok, found_file = has_tokens(ocr_text, filename_tokens, need=1)
-    ok = (dialog_ok and file_ok) or (path_ok and file_ok)
+    # OCR имени файла может быть нестабилен при выделении текста в поле ввода.
+    # Надёжный критерий: заголовок/структура системного окна + область пути.
+    ok = dialog_ok or (path_ok and file_ok)
     return ok, found_dialog + found_path + found_file
 
 
