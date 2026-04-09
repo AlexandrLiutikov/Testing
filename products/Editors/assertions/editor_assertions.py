@@ -6,6 +6,7 @@ Assertions — это проверяющие функции, которые:
 3. Возвращают результат (bool / tuple)
 """
 
+import os
 from typing import List, Optional, Tuple
 
 from shared.infra.ocr import has_tokens, ocr_image, find_token_bbox
@@ -13,6 +14,14 @@ from shared.infra.screenshots import take_screenshot
 from shared.infra.waits import wait_main_proc
 
 from products.Editors.actions.editor_actions import detect_warning_window
+
+SMOKE_TEXT_ASSERT_TOKENS = [
+    "Задача организации",
+    "сложившаяся структура",
+    "Товарищи",
+    "систем массового участия",
+    "1234567890",
+]
 
 
 def assert_window_exists(
@@ -167,3 +176,55 @@ def assert_text_entered_and_left_aligned(
     image_width = Image.open(screenshot_path).size[0]
     left_aligned = bbox["left"] <= int(image_width * max_left_ratio)
     return left_aligned, found
+
+
+def assert_text_absent(
+    screenshot_path: str,
+    tokens: List[str],
+    max_found: int = 0,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что ожидаемые токены текста отсутствуют на странице."""
+    take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+    _, found = has_tokens(ocr_text, tokens, need=1)
+    return len(found) <= max_found, found
+
+
+def assert_save_dialog_opened(
+    screenshot_path: str,
+    path_tokens: Optional[List[str]] = None,
+    filename_tokens: Optional[List[str]] = None,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что открыто системное окно сохранения."""
+    if path_tokens is None:
+        path_tokens = ["Документы", "Documents"]
+    if filename_tokens is None:
+        filename_tokens = ["Документ1", "Document1"]
+    dialog_tokens = [
+        "Сохранить как",
+        "Save As",
+        "Имя файла",
+        "File name",
+        "Тип файла",
+        "File type",
+        "Отмена",
+        "Cancel",
+        "Сохранить",
+        "Save",
+    ]
+
+    take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+
+    dialog_ok, found_dialog = has_tokens(ocr_text, dialog_tokens, need=2)
+    path_ok, found_path = has_tokens(ocr_text, path_tokens, need=1)
+    file_ok, found_file = has_tokens(ocr_text, filename_tokens, need=1)
+    # OCR имени файла может быть нестабилен при выделении текста в поле ввода.
+    # Надёжный критерий: заголовок/структура системного окна + область пути.
+    ok = dialog_ok or (path_ok and file_ok)
+    return ok, found_dialog + found_path + found_file
+
+
+def assert_file_exists(file_path: str) -> bool:
+    """Проверить, что файл существует в файловой системе."""
+    return os.path.isfile(file_path)

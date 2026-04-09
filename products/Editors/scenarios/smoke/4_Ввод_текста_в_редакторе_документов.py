@@ -23,6 +23,7 @@ from shared.drivers import get_driver
 
 from products.Editors.actions.editor_actions import type_document_text
 from products.Editors.assertions.editor_assertions import (
+    SMOKE_TEXT_ASSERT_TOKENS,
     assert_text_entered_and_left_aligned,
 )
 
@@ -50,15 +51,6 @@ TEXT_TO_TYPE = (
     "порядка, а также дальнейшее развитие различных форм деятельности представляет собой "
     "интересный эксперимент проверки систем массового участия. 1234567890!\"№;%:?*()_+-="
 )
-
-TEXT_ASSERT_TOKENS = [
-    "Задача организации",
-    "сложившаяся структура",
-    "Товарищи",
-    "систем массового участия",
-    "1234567890",
-]
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -132,7 +124,7 @@ def main():
             driver.activate_window(pid)
             last_ok, _ = assert_text_entered_and_left_aligned(
                 shot,
-                tokens=TEXT_ASSERT_TOKENS,
+                tokens=SMOKE_TEXT_ASSERT_TOKENS,
                 need=2,
                 anchor_token="Задача",
                 max_left_ratio=0.35,

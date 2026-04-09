@@ -370,6 +370,101 @@ Write-Output "NOTFOUND"
         self._send_ctrl_combo(0x4C)  # L
         time.sleep(0.3)
 
+    def undo_action(self, pid: int) -> None:
+        """Отменить последнее действие (Ctrl+Z)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x5A)  # Z
+        time.sleep(0.3)
+
+    def redo_action(self, pid: int) -> None:
+        """Повторить отменённое действие (Ctrl+Y)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x59)  # Y
+        time.sleep(0.3)
+
+    def save_document(self, pid: int) -> None:
+        """Открыть диалог сохранения документа (Ctrl+S)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x53)  # S
+        time.sleep(0.4)
+
+    def confirm_dialog(self, pid: int) -> None:
+        """Подтвердить активный диалог клавишей Enter."""
+        self.activate_window(pid)
+        self._tap_key(0x0D)  # Enter
+        time.sleep(0.5)
+
+    def close_current_tab(self, pid: int) -> None:
+        """Закрыть текущую вкладку документа (Ctrl+F4)."""
+        self.activate_window(pid)
+        self._send_ctrl_combo(0x73)  # F4
+        time.sleep(0.4)
+
+    def click_current_tab_close_button(self, pid: int) -> bool:
+        """Кликнуть по `X` активной вкладки через UIAutomation TabBar."""
+        ps = f"""
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+
+$root=[System.Windows.Automation.AutomationElement]::RootElement
+$pidCond=New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::ProcessIdProperty, {pid}
+)
+$wins=$root.FindAll([System.Windows.Automation.TreeScope]::Children, $pidCond)
+if ($wins.Count -eq 0) {{ Write-Output 'NOTFOUND'; exit }}
+$w=$wins.Item(0)
+
+$tabCond=New-Object System.Windows.Automation.PropertyCondition(
+  [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
+  'MainWindow.mainPanel.tabWrapper.asc_editors_tabbar'
+)
+$tab=$w.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $tabCond)
+if (-not $tab) {{ Write-Output 'NOTFOUND'; exit }}
+
+$tabs=$tab.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+  (New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::TabItem
+  )))
+if ($tabs.Count -eq 0) {{ Write-Output 'NOTFOUND'; exit }}
+
+$active = $null
+for ($i=0; $i -lt $tabs.Count; $i++) {{
+  $t = $tabs.Item($i)
+  try {{
+    $p = $t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    if ($p.Current.IsSelected) {{ $active = $t; break }}
+  }} catch {{}}
+}}
+if (-not $active) {{ $active = $tabs.Item(0) }}
+if (-not $active) {{ Write-Output 'NOTFOUND'; exit }}
+
+$r = $active.Current.BoundingRectangle
+if ($r.Width -le 0 -or $r.Height -le 0) {{ Write-Output 'NOTFOUND'; exit }}
+
+$offset = [Math]::Max(12, [Math]::Min(24, [int]($r.Width * 0.12)))
+$x = [int]($r.Right - $offset)
+$y = [int]($r.Top + ($r.Height / 2))
+Write-Output ($x.ToString() + ',' + $y.ToString())
+"""
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+        )
+        out = (r.stdout or "").strip()
+        if not out or out == "NOTFOUND":
+            return False
+        try:
+            x_str, y_str = out.split(",", 1)
+            x, y = int(x_str), int(y_str)
+        except Exception:
+            return False
+        self.activate_window(pid)
+        self._click_abs(x, y)
+        return True
+
     # ---------------------------------------------------------------
     # Modal / warning detection (UIAutomation через PowerShell)
     # ---------------------------------------------------------------
@@ -462,7 +557,9 @@ Write-Output "FALLBACK"
 
     @staticmethod
     def launch_editor(editor_path: str) -> None:
-        subprocess.Popen([editor_path])
+        # Для устойчивой автоматизации CEF-UI включаем debug-интерфейс.
+        # Это открывает локальный CDP-порт, который используют semantic actions.
+        subprocess.Popen([editor_path, "--ascdesktop-support-debug-info"])
 
     # ---------------------------------------------------------------
     # Keyboard / clipboard helpers
@@ -476,6 +573,24 @@ Write-Output "FALLBACK"
         ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
         time.sleep(pause_sec)
         ctypes.windll.user32.keybd_event(vk_code, 0, KEYEVENTF_KEYUP, 0)
+
+    @staticmethod
+    def _click_abs(px: int, py: int) -> None:
+        import ctypes
+
+        ctypes.windll.user32.SetCursorPos(px, py)
+        time.sleep(0.08)
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+        ctypes.windll.user32.mouse_event(
+            ctypes.c_ulong(MOUSEEVENTF_LEFTDOWN), ctypes.c_ulong(0),
+            ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_size_t(0),
+        )
+        ctypes.windll.user32.mouse_event(
+            ctypes.c_ulong(MOUSEEVENTF_LEFTUP), ctypes.c_ulong(0),
+            ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_size_t(0),
+        )
+        time.sleep(0.25)
 
     @staticmethod
     def _send_ctrl_combo(key_vk: int, pause_sec: float = 0.05) -> None:
