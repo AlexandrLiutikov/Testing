@@ -182,7 +182,7 @@ def main():
                 ),
             )
 
-        # Шаг 2. Клик «По размеру страницы».
+        # Шаг 2. Клик «По размеру страницы» + подтверждение страницы 1 целиком.
         zoom_trace = click_zoom_to_page(pid)
         shot2 = capture_step(
             runner.run_dir,
@@ -201,15 +201,25 @@ def main():
             ["Масштаб", "100%"],
             need=1,
         )
-        zoom_ok = bool(zoom_trace.get("ok")) and (zoom_label_ok or zoom_status_ok)
+        page1_full_ok, page1_full_found = assert_section_visible(
+            shot2,
+            ["Это особый колонтитул для первой страницы", "Страница 1 из 4", "Страница 1 из4"],
+            need=2,
+        )
+        page1_token_ok, page1_token_found = assert_reference_document_page_content(shot2, 1)
+        zoom_expected = "Масштаб изменён, страница целиком помещается в рабочей области"
+        zoom_ok = (
+            bool(zoom_trace.get("ok"))
+            and (zoom_label_ok or zoom_status_ok)
+            and page1_full_ok
+            and page1_token_ok
+        )
 
         with StepVerifier(
             runner,
             step_num=2,
             step_name="В строке состояния кликнуть «По размеру страницы»",
-            expected=(
-                "Масштаб изменён, страница целиком помещается в рабочей области"
-            ),
+            expected=zoom_expected,
             severity="HIGH",
             failure_area="CORE_FUNCTION",
         ) as step:
@@ -217,78 +227,135 @@ def main():
             _attach_action_trace(step, zoom_trace, "click_zoom_to_page")
             step.check(
                 condition=zoom_ok,
-                pass_msg=(
-                    "Команда «По размеру страницы» выполнена, строка масштаба доступна"
-                ),
+                pass_msg=zoom_expected,
                 fail_msg=(
-                    "Не удалось выполнить команду «По размеру страницы» "
-                    "или подтвердить строку состояния масштаба"
+                    "Не подтверждено отображение страницы 1 целиком после команды "
+                    f"«По размеру страницы». Маркеры full-page: "
+                    f"{page1_full_found if page1_full_found else 'нет'}; "
+                    f"маркеры страницы 1: {page1_token_found if page1_token_found else 'нет'}"
                 ),
             )
 
-        # Шаг 3. Проверить содержимое 4-х страниц эталона.
-        missing_pages = []
-        page_found_tokens = {}
-
-        for page_index in (1, 2, 3, 4):
-            if page_index > 1:
-                go_to_next_page(pid)
-
-            page_shot = capture_step(
-                runner.run_dir,
-                20 + page_index,
-                f"reference_page_{page_index}",
-                activate_driver=driver,
-                pid=pid,
-            )
-
-            page_ok_state = {"ok": False, "found": []}
-
-            def _probe_page() -> bool:
-                driver.activate_window(pid)
-                ok, found = assert_reference_document_page_content(page_shot, page_index)
-                page_ok_state["ok"] = ok
-                page_ok_state["found"] = found
-                return ok
-
-            page_ok = wait_until(_probe_page, timeout_sec=8, poll_interval=1.0) and page_ok_state["ok"]
-            page_found_tokens[page_index] = page_ok_state["found"]
-            if not page_ok:
-                missing_pages.append(page_index)
-
+        # Шаг 3. Проверка страницы 2.
+        page2_nav_trace = go_to_next_page(pid)
         shot3 = capture_step(
             runner.run_dir,
             3,
-            "reference_pages_check",
+            "reference_page_2_check",
             activate_driver=driver,
             pid=pid,
         )
-        pages_ok = not missing_pages
-        found_detail = "; ".join(
-            f"стр. {idx}: {', '.join(tokens) if tokens else 'нет OCR-токенов'}"
-            for idx, tokens in page_found_tokens.items()
-        )
+        page2_state = {"ok": False, "found": []}
+
+        def _probe_page2() -> bool:
+            driver.activate_window(pid)
+            ok, found = assert_reference_document_page_content(shot3, 2)
+            page2_state["ok"] = ok
+            page2_state["found"] = found
+            return ok
+
+        page2_ok = wait_until(_probe_page2, timeout_sec=8, poll_interval=1.0) and page2_state["ok"]
+        page2_expected = "Отображается страница 2 эталонного документа"
 
         with StepVerifier(
             runner,
             step_num=3,
-            step_name="Проверка отображения содержимого всех 4-х страниц",
-            expected=(
-                "Содержимое всех 4-х страниц отображается без визуальных нарушений"
-            ),
+            step_name="Проверка страницы 2",
+            expected=page2_expected,
             severity="HIGH",
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot3)
+            _attach_action_trace(step, page2_nav_trace, "go_to_next_page")
             step.check(
-                condition=pages_ok,
-                pass_msg=(
-                    "Проверено содержимое 4-х страниц эталонного документа: "
-                    "текстовые маркеры каждой страницы обнаружены"
-                ),
+                condition=page2_ok,
+                pass_msg=page2_expected,
                 fail_msg=(
-                    f"Не подтверждено отображение страниц: {missing_pages}. "
-                    f"Найденные OCR-маркеры: {found_detail}"
+                    "Не подтверждено отображение страницы 2. "
+                    f"Найденные OCR-маркеры: "
+                    f"{page2_state['found'] if page2_state['found'] else 'нет OCR-токенов'}"
+                ),
+            )
+
+        # Шаг 4. Проверка страницы 3.
+        page3_nav_trace = go_to_next_page(pid)
+        shot4 = capture_step(
+            runner.run_dir,
+            4,
+            "reference_page_3_check",
+            activate_driver=driver,
+            pid=pid,
+        )
+        page3_state = {"ok": False, "found": []}
+
+        def _probe_page3() -> bool:
+            driver.activate_window(pid)
+            ok, found = assert_reference_document_page_content(shot4, 3)
+            page3_state["ok"] = ok
+            page3_state["found"] = found
+            return ok
+
+        page3_ok = wait_until(_probe_page3, timeout_sec=8, poll_interval=1.0) and page3_state["ok"]
+        page3_expected = "Отображается страница 3 эталонного документа"
+
+        with StepVerifier(
+            runner,
+            step_num=4,
+            step_name="Проверка страницы 3",
+            expected=page3_expected,
+            severity="HIGH",
+            failure_area="CORE_FUNCTION",
+        ) as step:
+            step.screenshot(shot4)
+            _attach_action_trace(step, page3_nav_trace, "go_to_next_page")
+            step.check(
+                condition=page3_ok,
+                pass_msg=page3_expected,
+                fail_msg=(
+                    "Не подтверждено отображение страницы 3. "
+                    f"Найденные OCR-маркеры: "
+                    f"{page3_state['found'] if page3_state['found'] else 'нет OCR-токенов'}"
+                ),
+            )
+
+        # Шаг 5. Проверка страницы 4.
+        page4_nav_trace = go_to_next_page(pid)
+        shot5 = capture_step(
+            runner.run_dir,
+            5,
+            "reference_page_4_check",
+            activate_driver=driver,
+            pid=pid,
+        )
+        page4_state = {"ok": False, "found": []}
+
+        def _probe_page4() -> bool:
+            driver.activate_window(pid)
+            ok, found = assert_reference_document_page_content(shot5, 4)
+            page4_state["ok"] = ok
+            page4_state["found"] = found
+            return ok
+
+        page4_ok = wait_until(_probe_page4, timeout_sec=8, poll_interval=1.0) and page4_state["ok"]
+        page4_expected = "Отображается страница 4 эталонного документа"
+
+        with StepVerifier(
+            runner,
+            step_num=5,
+            step_name="Проверка страницы 4",
+            expected=page4_expected,
+            severity="HIGH",
+            failure_area="CORE_FUNCTION",
+        ) as step:
+            step.screenshot(shot5)
+            _attach_action_trace(step, page4_nav_trace, "go_to_next_page")
+            step.check(
+                condition=page4_ok,
+                pass_msg=page4_expected,
+                fail_msg=(
+                    "Не подтверждено отображение страницы 4. "
+                    f"Найденные OCR-маркеры: "
+                    f"{page4_state['found'] if page4_state['found'] else 'нет OCR-токенов'}"
                 ),
             )
 
