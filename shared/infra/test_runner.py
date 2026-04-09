@@ -70,6 +70,9 @@ def _write_artefacts(
         if s["status"] == "FAIL" and s.get("failure_type") == "INFRA_FAIL"
     )
     blocked = sum(1 for s in steps if s["status"] == "BLOCKED")
+    warning_steps = sum(1 for s in steps if s.get("warnings"))
+    warnings_total = sum(len(s.get("warnings", [])) for s in steps)
+    fallback_steps = sum(1 for s in steps if s.get("fallback_source"))
 
     results_data = {
         "environment": env,
@@ -81,8 +84,13 @@ def _write_artefacts(
             "failed": test_failed,
             "infra_failed": infra_failed,
             "blocked": blocked,
+            "warning_steps": warning_steps,
+            "warnings_total": warnings_total,
+            "fallback_steps": fallback_steps,
         },
         "release_decision": decision,
+        "run_confidence": decision.get("run_confidence"),
+        "run_confidence_detail": decision.get("run_confidence_detail"),
     }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(results_data, f, indent=2, ensure_ascii=False)
@@ -193,6 +201,9 @@ class CaseRunner:
                 screenshot=kwargs.get("screenshot", ""),
                 duration_ms=kwargs.get("duration_ms", 0),
                 critical_path=kwargs.get("critical_path", False),
+                warnings=kwargs.get("warnings"),
+                fallback_source=kwargs.get("fallback_source"),
+                fallback_reason=kwargs.get("fallback_reason"),
             )
         elif status == "FAIL":
             step_obj = StepResult.make_fail(
@@ -208,6 +219,9 @@ class CaseRunner:
                 failure_detail=kwargs.get("failure_detail", ""),
                 failure_type=kwargs.get("failure_type", "TEST_FAIL"),
                 critical_path=kwargs.get("critical_path", False),
+                warnings=kwargs.get("warnings"),
+                fallback_source=kwargs.get("fallback_source"),
+                fallback_reason=kwargs.get("fallback_reason"),
             )
         elif status == "BLOCKED":
             step_obj = StepResult.make_blocked(
@@ -220,6 +234,9 @@ class CaseRunner:
                 duration_ms=kwargs.get("duration_ms", 0),
                 failure_detail=kwargs.get("failure_detail", ""),
                 critical_path=kwargs.get("critical_path", False),
+                warnings=kwargs.get("warnings"),
+                fallback_source=kwargs.get("fallback_source"),
+                fallback_reason=kwargs.get("fallback_reason"),
             )
         else:
             raise ValueError(f"Неподдерживаемый статус шага: {status}")

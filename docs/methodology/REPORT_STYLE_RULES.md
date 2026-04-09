@@ -43,7 +43,7 @@
 
 **Результат:**
 - `Результат: <badge>` (PASS/FAIL по шагам)
-- `PASS: X | FAIL: Y` (при необходимости `| BLOCKED: Z`)
+- `PASS: X | FAIL: Y | BLOCKED: Z | WARN: N | FALLBACK_STEPS: M`
 
 ### Пример мета-блока
 
@@ -98,8 +98,30 @@
     </ul>
   </div>
 
+  <div class='decision-section'>
+    <strong>INFRA issues:</strong>
+    <ul>
+      <li>Шаг «Сохранение»: OCR timeout в системном диалоге</li>
+    </ul>
+  </div>
+
+  <div class='decision-section'>
+    <strong>BLOCKED cases:</strong>
+    <ul>
+      <li>Шаг «Печать»: стенд без настроенного принтера</li>
+    </ul>
+  </div>
+
+  <div class='decision-section'>
+    <strong>Warnings:</strong>
+    <ul>
+      <li>LOW: Обнаружен новый UI-элемент во вкладке «Вставка»</li>
+    </ul>
+  </div>
+
   <div class='decision-stats'>
-    Всего кейсов: 3 | Критические пути: 5/5 (100%) | PASS: 6 | FAIL: 1
+    Всего шагов: 12 | PASS: 9 | TEST_FAIL: 1 | INFRA_FAIL: 1 | BLOCKED: 1 | WARN: 4 | Критические пути: 5/5
+    <br>Run confidence: SUFFICIENT 2 из 12 шагов имеют статус INFRA_FAIL/BLOCKED
   </div>
 </div>
 ```
@@ -122,14 +144,16 @@
 2. `Шаг`
 3. `Статус`
 4. `Severity` (новая колонка — заполняется только для FAIL)
-5. `Ожидание`
-6. `Факт`
-7. `Скриншот`
+5. `Warnings/Fallback`
+6. `Ожидание`
+7. `Факт`
+8. `Скриншот`
 
 Каждая строка = один проверяемый шаг кейса.
 
 Для строк с FAIL в колонке Severity указывать уровень: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`.
 Для строк с PASS колонка Severity остаётся пустой.
+В `Warnings/Fallback` выводятся предупреждения шага и факт fallback (`fallback_source`, `fallback_reason`).
 
 ## 6. Статусы и цвета
 - PASS: класс `.pass`, зеленый `#1a7f37`
@@ -225,14 +249,32 @@ HTML-отчёт подключает стили через `<link rel='styleshee
   "summary": {
     "total": 3,
     "passed": 3,
-    "failed": 0
+    "failed": 0,
+    "infra_failed": 0,
+    "blocked": 0,
+    "warning_steps": 0,
+    "warnings_total": 0,
+    "fallback_steps": 0
   },
+  "run_confidence": "FULL",
+  "run_confidence_detail": "0 из 3 шагов имеют статус INFRA_FAIL/BLOCKED; critical coverage: 3/3.",
   "release_decision": {
     "verdict": "GO",
     "reasons": ["Все шаги пройдены, критический путь покрыт"],
     "risks": [],
+    "infra_issues": [],
+    "blocked_cases": [],
+    "warnings": [],
     "recommendations": ["Релиз разрешён"],
+    "run_confidence": "FULL",
+    "run_confidence_detail": "Прогон без инфраструктурных потерь сигнала.",
     "stats": {
+      "total": 3,
+      "passed": 3,
+      "test_failed": 0,
+      "infra_failed": 0,
+      "blocked": 0,
+      "warnings_total": 0,
       "critical_path_coverage": "1/1"
     }
   }

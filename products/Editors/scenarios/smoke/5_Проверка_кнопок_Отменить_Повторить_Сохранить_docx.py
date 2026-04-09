@@ -47,6 +47,32 @@ CASE_META = {
 }
 
 
+def _attach_action_trace(step, trace: dict, action_name: str):
+    if not trace:
+        return
+
+    if trace.get("fallback_used"):
+        step.set_fallback(
+            trace.get("fallback_source", ""),
+            trace.get("fallback_reason", ""),
+        )
+
+    mode = str(trace.get("mode", "")).strip()
+    if mode and mode not in ("DOM_CDP", "DOM_FOCUS", "UIA"):
+        step.add_warning(
+            code=f"{action_name.upper()}_MODE",
+            severity="LOW",
+            message=f"Action выполнился в режиме {mode}, а не в DOM/UIA primary.",
+        )
+
+    for w in trace.get("warnings", []) or []:
+        step.add_warning(
+            code=w.get("code", "ACTION_WARNING"),
+            severity=w.get("severity", "LOW"),
+            message=w.get("message", ""),
+        )
+
+
 def _candidate_save_paths() -> list:
     """Сформировать кандидаты пути документа по умолчанию."""
     home = Path.home()
@@ -130,6 +156,7 @@ def main():
 
         # Шаг 1. Отменить ввод текста
         undo_clicked = False
+        undo_trace = {}
         shot1 = capture_step(runner.run_dir, 1, "undo", activate_driver=driver, pid=pid)
 
         last_ok = False
@@ -142,7 +169,8 @@ def main():
 
         undo_ok = False
         for _ in range(5):
-            click_ok = undo_last_action(pid, allow_hotkey_fallback=False)
+            undo_trace = undo_last_action(pid, allow_hotkey_fallback=False)
+            click_ok = bool(undo_trace.get("ok"))
             undo_clicked = undo_clicked or click_ok
             if not undo_clicked:
                 break
@@ -161,6 +189,7 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot1)
+            _attach_action_trace(step, undo_trace, "undo_last_action")
             step.check(
                 condition=undo_ok,
                 pass_msg="Команда «Отменить» выполнена, текст на странице отсутствует",
@@ -172,6 +201,7 @@ def main():
 
         # Шаг 2. Повторить ввод текста
         redo_clicked = False
+        redo_trace = {}
         shot2 = capture_step(runner.run_dir, 2, "redo", activate_driver=driver, pid=pid)
 
         def _probe_redo() -> bool:
@@ -182,7 +212,8 @@ def main():
 
         redo_ok = False
         for _ in range(5):
-            click_ok = redo_last_action(pid, allow_hotkey_fallback=False)
+            redo_trace = redo_last_action(pid, allow_hotkey_fallback=False)
+            click_ok = bool(redo_trace.get("ok"))
             redo_clicked = redo_clicked or click_ok
             if not redo_clicked:
                 break
@@ -199,6 +230,7 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot2)
+            _attach_action_trace(step, redo_trace, "redo_last_action")
             step.check(
                 condition=redo_ok,
                 pass_msg="Команда «Повторить» выполнена, текст снова отображается",
@@ -209,7 +241,7 @@ def main():
             )
 
         # Шаг 3. Сохранение документа
-        save_active_document(pid, allow_hotkey_fallback=False)
+        save_trace = save_active_document(pid, allow_hotkey_fallback=False)
         shot3 = capture_step(
             runner.run_dir,
             3,
@@ -244,6 +276,7 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot3)
+            _attach_action_trace(step, save_trace, "save_active_document")
             step.check(
                 condition=save_dialog_ok,
                 pass_msg="Открыто системное окно сохранения, имя документа по умолчанию отображается",
@@ -294,6 +327,7 @@ def main():
         # Шаг 5. Проверка существования файла
         candidates = _candidate_save_paths()
         saved_path = {"value": ""}
+        recursive_search_used = {"value": False}
 
         def _probe_file_exists() -> bool:
             for path in candidates:
@@ -305,6 +339,7 @@ def main():
             for pattern in ("Документ1.docx", "Document1.docx"):
                 try:
                     for found in home.rglob(pattern):
+                        recursive_search_used["value"] = True
                         saved_path["value"] = str(found)
                         return True
                 except OSError:
@@ -329,6 +364,16 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot5)
+            if recursive_search_used["value"]:
+                step.set_fallback(
+                    "FILESYSTEM_RECURSIVE_SEARCH",
+                    "Файл не найден в стандартных каталогах; применён рекурсивный поиск в профиле пользователя.",
+                )
+                step.add_warning(
+                    code="FILE_SEARCH_FALLBACK",
+                    severity="LOW",
+                    message="Путь сохранённого файла получен через рекурсивный fallback-поиск.",
+                )
             step.check(
                 condition=file_ok,
                 pass_msg=f"Сохранённый файл найден: {saved_path['value']}",
@@ -365,8 +410,10 @@ def main():
             return last_ok
 
         post_ok = False
+        close_trace = {}
         for _ in range(3):
-            close_clicked = close_active_document_tab(pid, allow_hotkey_fallback=False)
+            close_trace = close_active_document_tab(pid, allow_hotkey_fallback=False)
+            close_clicked = bool(close_trace.get("ok"))
             if not close_clicked:
                 break
             if wait_until(_probe_main_screen, timeout_sec=3.0, poll_interval=0.5) and last_ok:
@@ -385,6 +432,7 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot6)
+            _attach_action_trace(step, close_trace, "close_active_document_tab")
             step.check(
                 condition=post_ok,
                 pass_msg=(

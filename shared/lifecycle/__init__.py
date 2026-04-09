@@ -17,7 +17,8 @@ def app_lifecycle(
     editor_path: str,
     process_name: str = "editors",
     wait_timeout_sec: float = 20,
-) -> int:
+    return_info: bool = False,
+):
     """Полный цикл запуска: kill → launch → detect main window.
 
     Args:
@@ -26,7 +27,7 @@ def app_lifecycle(
         wait_timeout_sec: Максимальное время ожидания появления окна.
 
     Returns:
-        PID главного окна редактора.
+        PID главного окна редактора или `(pid, launch_info)` при `return_info=True`.
 
     Raises:
         RuntimeError: Если окно не появилось в течение timeout.
@@ -36,20 +37,46 @@ def app_lifecycle(
     # 1. Kill
     driver.kill_editors()
 
-    # 2. Launch
-    driver.launch_editor(editor_path)
+    launch_info = {
+        "fallback_used": False,
+        "launch_mode": "debug",
+        "fallback_source": None,
+        "fallback_reason": "",
+        "attempts": [],
+    }
+
+    # 2. Launch (debug mode first)
+    driver.launch_editor(editor_path, enable_debug=True)
+    pid = wait_main_proc(process_name, wait_timeout_sec)
+    launch_info["attempts"].append({"mode": "debug", "success": pid is not None})
+
+    # 2b. Fallback: standard launch without debug flag
+    if pid is None:
+        launch_info["fallback_used"] = True
+        launch_info["launch_mode"] = "standard"
+        launch_info["fallback_source"] = "LAUNCH_NO_DEBUG"
+        launch_info["fallback_reason"] = (
+            "Запуск с debug-флагом не дал главное окно в пределах timeout; "
+            "выполнен повторный запуск без debug-флага."
+        )
+        driver.kill_editors()
+        driver.launch_editor(editor_path, enable_debug=False)
+        pid = wait_main_proc(process_name, wait_timeout_sec)
+        launch_info["attempts"].append({"mode": "standard", "success": pid is not None})
 
     # 3. Detect main window
-    pid = wait_main_proc(process_name, wait_timeout_sec)
     if pid is None:
+        launch_info["launch_mode"] = "failed"
         raise RuntimeError(
             f"Окно редактора («{process_name}») не появилось "
-            f"в течение {wait_timeout_sec} секунд"
+            f"в течение {wait_timeout_sec} секунд ни в debug-, ни в standard-режиме."
         )
 
     # 4. Activate
     driver.activate_window(pid)
 
+    if return_info:
+        return pid, launch_info
     return pid
 
 

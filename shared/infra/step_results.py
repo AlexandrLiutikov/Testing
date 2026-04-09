@@ -4,13 +4,15 @@
   step_id, step_name, status, expected, actual, screenshot, timestamp, duration_ms, critical_path
 Для non-PASS добавляются:
   failure_type, failure_severity, failure_area, failure_detail
+Дополнительно для прозрачности прогона:
+  warnings, fallback_source, fallback_reason
 
 Этот модуль централизует структуру, чтобы она не расползалась по кейсам.
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 
 @dataclass
@@ -34,6 +36,9 @@ class StepResult:
         failure_severity:    CRITICAL / HIGH / MEDIUM / LOW
         failure_area:        Область сбоя (CORE_FUNCTION, UI_LAYOUT, и т.д.)
         failure_detail:      Развёрнутое описание проблемы
+        warnings:            Непрерывающие предупреждения шага
+        fallback_source:     Источник fallback (например HOTKEY, OCR, COORDINATES)
+        fallback_reason:     Причина перехода на fallback
     """
 
     step_id: str
@@ -52,6 +57,9 @@ class StepResult:
     failure_severity: Optional[str] = None
     failure_area: Optional[str] = None
     failure_detail: Optional[str] = None
+    warnings: List[dict] = field(default_factory=list)
+    fallback_source: Optional[str] = None
+    fallback_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Сериализовать в dict для JSON/CSV/отчётов."""
@@ -68,6 +76,9 @@ class StepResult:
         screenshot: str,
         duration_ms: int,
         critical_path: bool = False,
+        warnings: Optional[List[dict]] = None,
+        fallback_source: Optional[str] = None,
+        fallback_reason: Optional[str] = None,
     ) -> "StepResult":
         """Создать результат успешного шага."""
         return cls(
@@ -81,6 +92,9 @@ class StepResult:
             timestamp=datetime.now().isoformat(),
             duration_ms=duration_ms,
             critical_path=critical_path,
+            warnings=list(warnings or []),
+            fallback_source=fallback_source,
+            fallback_reason=fallback_reason,
         )
 
     @classmethod
@@ -98,6 +112,9 @@ class StepResult:
         failure_detail: str = "",
         failure_type: str = "TEST_FAIL",
         critical_path: bool = False,
+        warnings: Optional[List[dict]] = None,
+        fallback_source: Optional[str] = None,
+        fallback_reason: Optional[str] = None,
     ) -> "StepResult":
         """Создать результат неудачного шага."""
         return cls(
@@ -115,6 +132,9 @@ class StepResult:
             failure_severity=failure_severity,
             failure_area=failure_area,
             failure_detail=failure_detail or actual,
+            warnings=list(warnings or []),
+            fallback_source=fallback_source,
+            fallback_reason=fallback_reason,
         )
 
     @classmethod
@@ -129,6 +149,9 @@ class StepResult:
         duration_ms: int,
         failure_detail: str = "",
         critical_path: bool = False,
+        warnings: Optional[List[dict]] = None,
+        fallback_source: Optional[str] = None,
+        fallback_reason: Optional[str] = None,
     ) -> "StepResult":
         """Создать результат заблокированного шага (не выполнился из-за предыдущего сбоя)."""
         return cls(
@@ -144,4 +167,7 @@ class StepResult:
             critical_path=critical_path,
             failure_type="BLOCKED",
             failure_detail=failure_detail or actual,
+            warnings=list(warnings or []),
+            fallback_source=fallback_source,
+            fallback_reason=fallback_reason,
         )

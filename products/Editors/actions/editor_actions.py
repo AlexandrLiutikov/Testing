@@ -22,26 +22,85 @@ from shared.infra.screenshots import take_screenshot
 
 logger = logging.getLogger(__name__)
 
+_ACTION_TRACE = {}
+
+
+def _trace(
+    action: str,
+    ok: bool,
+    mode: str,
+    fallback_used: bool = False,
+    fallback_source: str = "",
+    fallback_reason: str = "",
+    warnings: list = None,
+) -> dict:
+    info = {
+        "action": action,
+        "ok": bool(ok),
+        "mode": mode,
+        "fallback_used": bool(fallback_used),
+        "fallback_source": fallback_source or "",
+        "fallback_reason": fallback_reason or "",
+        "warnings": list(warnings or []),
+    }
+    _ACTION_TRACE[action] = info
+    return info
+
+
+def consume_action_trace(action: str) -> dict:
+    """Получить и удалить последнюю трассировку action."""
+    return _ACTION_TRACE.pop(action, {})
+
+
+_START_MENU_LABELS = {
+    "home": ["Главная", "Home"],
+    "templates": ["Шаблоны", "Templates"],
+    "local": ["Локальные файлы", "Локальные", "Local Files", "Local"],
+    "collab": ["Совместная работа", "Совместная", "Collaboration"],
+    "settings": ["Настройки", "Settings"],
+    "about": ["О программе", "О приложении", "About"],
+}
+
 
 def click_menu(pid: int, menu_key: str):
     """Активировать окно и кликнуть по пункту левого меню стартового экрана.
     
-    Основной путь: семантический поиск элемента через driver.click_menu_item().
+    Основной путь: DOM/CDP клик по пункту меню.
     Fallback цепочка внутри driver: accessibility → OCR → coordinates → CV.
     """
     driver = get_driver()
     driver.activate_window(pid)
-    
-    # Семантический клик с fallback цепочкой внутри driver
+
+    # Основной путь: DOM/CDP (быстрее и устойчивее для CEF-startscreen).
+    if _cdp_click_start_menu_item(menu_key):
+        return _trace("click_menu", True, "DOM_CDP")
+
+    # FALLBACK: семантический клик с fallback цепочкой внутри platform driver.
     success = driver.click_menu_item(pid, menu_key)
     
     if not success:
+        _trace(
+            "click_menu",
+            False,
+            "FAILED",
+            fallback_used=True,
+            fallback_source="DRIVER_CHAIN_EXHAUSTED",
+            fallback_reason=f"Не удалось кликнуть menu_key={menu_key}",
+        )
         raise RuntimeError(
             f"Не удалось кликнуть по пункту меню '{menu_key}': "
             f"все fallback методы исчерпаны"
         )
-    
+
     time.sleep(0.6)  # ожидание перехода (Semantic Actions Layer)
+    return _trace(
+        "click_menu",
+        True,
+        "DRIVER_CHAIN",
+        fallback_used=True,
+        fallback_source="DRIVER_CHAIN",
+        fallback_reason="DOM/CDP клик недоступен; использована цепочка driver fallback.",
+    )
 
 
 def dismiss_collab_popup(pid: int):
@@ -60,14 +119,47 @@ def type_document_text(pid: int, text: str, align_left: bool = False):
     driver = get_driver()
     driver.activate_window(pid)
 
-    # FALLBACK: у CEF-холста нет стабильного accessibility-id, поэтому
-    # фокусируем рабочую область относительным кликом по центру страницы.
-    driver.click_rel(pid, 0.50, 0.45)
-    time.sleep(0.2)
+    warnings = []
+    used_fallback = False
+    fallback_source = ""
+    fallback_reason = ""
+
+    # Основной путь: попытка сфокусировать содержимое редактора через DOM.
+    focus = _cdp_eval_in_editor_frame(
+        """
+  const target = doc.querySelector('[contenteditable="true"], [role="textbox"], .ace_content');
+  if (!target) return {ok:false, reason:'focus_target_not_found'};
+  target.focus();
+  return {ok:true};
+"""
+    )
+    focused = bool(isinstance(focus, dict) and focus.get("ok"))
+    if not focused:
+        used_fallback = True
+        fallback_source = "COORDINATE_FOCUS"
+        fallback_reason = "DOM focus недоступен; фокус установлен координатным кликом."
+        warnings.append({
+            "code": "FOCUS_FALLBACK",
+            "severity": "LOW",
+            "message": "DOM-фокус недоступен, использован координатный фокус.",
+        })
+        # FALLBACK: у CEF-холста нет стабильного accessibility-id, поэтому
+        # фокусируем рабочую область относительным кликом по центру страницы.
+        driver.click_rel(pid, 0.50, 0.45)
+        time.sleep(0.2)
 
     driver.paste_text(pid, text)
     if align_left:
         driver.align_paragraph_left(pid)
+    return _trace(
+        "type_document_text",
+        True,
+        "DOM_FOCUS" if focused else "COORDINATE_FOCUS",
+        fallback_used=used_fallback,
+        fallback_source=fallback_source,
+        fallback_reason=fallback_reason,
+        warnings=warnings,
+    )
 
 
 _QUICK_ACCESS_BUTTONS = {
@@ -326,6 +418,93 @@ def _cdp_click_selector(selector: str) -> bool:
         return False
 
 
+def _cdp_eval_root(expression_body: str):
+    """Выполнить JS в корневом DOM окна редактора (без iframe)."""
+    port = _read_devtools_port()
+    ws_url = _choose_cdp_target(port)
+    if not ws_url:
+        return None
+    script = f"""
+(() => {{
+  {expression_body}
+}})()
+"""
+    try:
+        with _CdpWsClient(ws_url, timeout_sec=2.0) as cdp:
+            result = cdp.call(
+                "Runtime.evaluate",
+                {
+                    "expression": script,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                },
+            )
+        return (
+            result.get("result", {})
+            .get("result", {})
+            .get("value", {})
+        )
+    except Exception:
+        return None
+
+
+def _cdp_click_start_menu_item(menu_key: str) -> bool:
+    labels = _START_MENU_LABELS.get(menu_key, [menu_key])
+    result = _cdp_eval_root(
+        f"""
+  const labels = {json.dumps(labels)};
+  const isVisible = (el) => {{
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 2 && r.height > 2;
+  }};
+
+  const clickable = Array.from(document.querySelectorAll('a,button,div,span'))
+    .filter(isVisible)
+    .filter(el => el.getBoundingClientRect().left < window.innerWidth * 0.38);
+
+  for (const lbl of labels) {{
+    const found = clickable.find(el => (el.textContent || '').trim() === lbl);
+    if (found) {{
+      found.click();
+      return {{ok:true, label: lbl}};
+    }}
+  }}
+  return {{ok:false, reason:'not_found'}};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
+
+
+def list_start_menu_items_dom() -> list:
+    """Вернуть список видимых пунктов стартового меню через DOM/CDP."""
+    result = _cdp_eval_root(
+        """
+  const isVisible = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 4 && r.height > 4;
+  };
+  const left = Array.from(document.querySelectorAll('a,button,div,span'))
+    .filter(isVisible)
+    .filter(el => el.getBoundingClientRect().left < window.innerWidth * 0.38)
+    .map(el => (el.textContent || '').trim())
+    .filter(Boolean);
+  const uniq = Array.from(new Set(left)).slice(0, 80);
+  return {ok:true, items: uniq};
+"""
+    )
+    if isinstance(result, dict):
+        items = result.get("items")
+        if isinstance(items, list):
+            return [str(x).strip() for x in items if str(x).strip()]
+    return []
+
+
 def _cdp_click_selector_in_editor_frame(selector: str) -> bool:
     """Кликнуть по селектору внутри iframe `frameEditor` (основной путь для CEF-редактора)."""
     result = _cdp_eval_in_editor_frame(
@@ -385,6 +564,58 @@ def _cdp_eval_in_editor_frame(expression_body: str):
         return None
 
 
+def _cdp_click_toolbar_tab(tab_name: str) -> bool:
+    alt = tab_name.split()[0] if " " in tab_name else tab_name
+    result = _cdp_eval_in_editor_frame(
+        f"""
+  const wants = [{json.dumps(tab_name)}, {json.dumps(alt)}];
+  const isVisible = (el) => {{
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 2 && r.height > 2 && r.top < 220;
+  }};
+  const nodes = Array.from(doc.querySelectorAll('a,button,div,span,[role="tab"]')).filter(isVisible);
+  for (const want of wants) {{
+    const found = nodes.find(el => (el.textContent || '').trim() === want);
+    if (found) {{
+      found.click();
+      return {{ok:true, label: want}};
+    }}
+  }}
+  return {{ok:false, reason:'not_found'}};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
+
+
+def list_toolbar_tabs_dom() -> list:
+    """Вернуть список видимых вкладок ленты через DOM/CDP."""
+    result = _cdp_eval_in_editor_frame(
+        """
+  const isVisible = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 6 && r.height > 6 && r.top < 220;
+  };
+  const items = Array.from(doc.querySelectorAll('a,button,div,span,[role="tab"]'))
+    .filter(isVisible)
+    .map(el => (el.textContent || '').trim())
+    .filter(Boolean);
+  const uniq = Array.from(new Set(items)).slice(0, 120);
+  return {ok:true, items: uniq};
+"""
+    )
+    if isinstance(result, dict):
+        items = result.get("items")
+        if isinstance(items, list):
+            return [str(x).strip() for x in items if str(x).strip()]
+    return []
+
+
 def _click_quick_access_button_via_cdp(button_key: str) -> bool:
     selectors = _QUICK_ACCESS_SELECTORS.get(button_key, [])
     for selector in selectors:
@@ -401,7 +632,7 @@ def _click_quick_access_button_via_cdp(button_key: str) -> bool:
     return False
 
 
-def _click_quick_access_button(pid: int, button_key: str) -> bool:
+def _click_quick_access_button(pid: int, button_key: str):
     """Кликнуть по кнопке панели быстрого доступа слева от вкладки «Файл».
 
     Основной путь для шагов вида «кликнуть кнопку ...»:
@@ -415,7 +646,7 @@ def _click_quick_access_button(pid: int, button_key: str) -> bool:
     # Основной путь: DOM-клик через CDP (debug-порт редактора).
     # Это устойчиво к DPI/разрешению и не зависит от координат.
     if _click_quick_access_button_via_cdp(button_key):
-        return True
+        return True, "DOM_CDP"
 
     from PIL import Image
 
@@ -446,7 +677,7 @@ def _click_quick_access_button(pid: int, button_key: str) -> bool:
             target_y = int(rel_y * height)
             driver.click_rel(pid, target_x / width, target_y / height)
             time.sleep(0.12)
-        return True
+        return True, "COORDINATES"
     finally:
         try:
             _os.remove(screenshot_path)
@@ -454,49 +685,88 @@ def _click_quick_access_button(pid: int, button_key: str) -> bool:
             pass
 
 
-def undo_last_action(pid: int, allow_hotkey_fallback: bool = True) -> bool:
+def undo_last_action(pid: int, allow_hotkey_fallback: bool = True) -> dict:
     """Выполнить команду «Отменить».
 
     Возвращает True, если выполнен UI-клик или fallback.
     """
-    if _click_quick_access_button(pid, "undo"):
-        return True
+    clicked, mode = _click_quick_access_button(pid, "undo")
+    if clicked:
+        return _trace("undo_last_action", True, mode)
     if not allow_hotkey_fallback:
-        return False
+        return _trace("undo_last_action", False, "FAILED")
     # FALLBACK: UI-кнопка не найдена OCR; используем Ctrl+Z как резерв.
     logger.warning("FALLBACK: кнопка «Отменить» не найдена, применён Ctrl+Z")
     get_driver().undo_action(pid)
-    return True
+    return _trace(
+        "undo_last_action",
+        True,
+        "HOTKEY",
+        fallback_used=True,
+        fallback_source="HOTKEY_CTRL_Z",
+        fallback_reason="UI-кнопка Undo недоступна; применён горячий клавишный fallback.",
+        warnings=[{
+            "code": "UNDO_FALLBACK",
+            "severity": "LOW",
+            "message": "Использован fallback Ctrl+Z вместо UI-кнопки «Отменить».",
+        }],
+    )
 
 
-def redo_last_action(pid: int, allow_hotkey_fallback: bool = True) -> bool:
+def redo_last_action(pid: int, allow_hotkey_fallback: bool = True) -> dict:
     """Выполнить команду «Повторить».
 
     Возвращает True, если выполнен UI-клик или fallback.
     """
-    if _click_quick_access_button(pid, "redo"):
-        return True
+    clicked, mode = _click_quick_access_button(pid, "redo")
+    if clicked:
+        return _trace("redo_last_action", True, mode)
     if not allow_hotkey_fallback:
-        return False
+        return _trace("redo_last_action", False, "FAILED")
     # FALLBACK: UI-кнопка не найдена OCR; используем Ctrl+Y как резерв.
     logger.warning("FALLBACK: кнопка «Повторить» не найдена, применён Ctrl+Y")
     get_driver().redo_action(pid)
-    return True
+    return _trace(
+        "redo_last_action",
+        True,
+        "HOTKEY",
+        fallback_used=True,
+        fallback_source="HOTKEY_CTRL_Y",
+        fallback_reason="UI-кнопка Redo недоступна; применён горячий клавишный fallback.",
+        warnings=[{
+            "code": "REDO_FALLBACK",
+            "severity": "LOW",
+            "message": "Использован fallback Ctrl+Y вместо UI-кнопки «Повторить».",
+        }],
+    )
 
 
-def save_active_document(pid: int, allow_hotkey_fallback: bool = True) -> bool:
+def save_active_document(pid: int, allow_hotkey_fallback: bool = True) -> dict:
     """Выполнить команду «Сохранить».
 
     Возвращает True, если выполнен UI-клик или fallback.
     """
-    if _click_quick_access_button(pid, "save"):
-        return True
+    clicked, mode = _click_quick_access_button(pid, "save")
+    if clicked:
+        return _trace("save_active_document", True, mode)
     if not allow_hotkey_fallback:
-        return False
+        return _trace("save_active_document", False, "FAILED")
     # FALLBACK: UI-кнопка не найдена OCR; используем Ctrl+S как резерв.
     logger.warning("FALLBACK: кнопка «Сохранить» не найдена, применён Ctrl+S")
     get_driver().save_document(pid)
-    return True
+    return _trace(
+        "save_active_document",
+        True,
+        "HOTKEY",
+        fallback_used=True,
+        fallback_source="HOTKEY_CTRL_S",
+        fallback_reason="UI-кнопка Save недоступна; применён горячий клавишный fallback.",
+        warnings=[{
+            "code": "SAVE_FALLBACK",
+            "severity": "LOW",
+            "message": "Использован fallback Ctrl+S вместо UI-кнопки «Сохранить».",
+        }],
+    )
 
 
 def confirm_active_dialog(pid: int):
@@ -504,7 +774,7 @@ def confirm_active_dialog(pid: int):
     get_driver().confirm_dialog(pid)
 
 
-def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> bool:
+def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> dict:
     """Закрыть текущую вкладку по кнопке «X».
 
     Возвращает True, если выполнен UI-клик или fallback.
@@ -515,7 +785,7 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
     # Основной путь: нативный UIA-клик по `X` активной вкладки TabBar фрейма.
     try:
         if driver.click_current_tab_close_button(pid):
-            return True
+            return _trace("close_active_document_tab", True, "UIA")
     except Exception:
         pass
 
@@ -548,14 +818,38 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
             pass
 
     if clicked:
-        return True
+        return _trace(
+            "close_active_document_tab",
+            True,
+            "COORDINATES",
+            fallback_used=True,
+            fallback_source="COORDINATE_TAB_CLOSE",
+            fallback_reason="UIA-кнопка закрытия вкладки недоступна; применён координатный fallback.",
+            warnings=[{
+                "code": "TAB_CLOSE_FALLBACK",
+                "severity": "LOW",
+                "message": "Вкладка закрыта координатным fallback.",
+            }],
+        )
 
     if not allow_hotkey_fallback:
-        return False
+        return _trace("close_active_document_tab", False, "FAILED")
     # FALLBACK: кнопка «X» вкладки не найдена OCR; используем Ctrl+F4.
     logger.warning("FALLBACK: кнопка закрытия вкладки не найдена, применён Ctrl+F4")
     driver.close_current_tab(pid)
-    return True
+    return _trace(
+        "close_active_document_tab",
+        True,
+        "HOTKEY",
+        fallback_used=True,
+        fallback_source="HOTKEY_CTRL_F4",
+        fallback_reason="UIA/OCR/координаты закрытия вкладки недоступны; применён Ctrl+F4.",
+        warnings=[{
+            "code": "TAB_CLOSE_HOTKEY_FALLBACK",
+            "severity": "LOW",
+            "message": "Использован fallback Ctrl+F4 для закрытия вкладки.",
+        }],
+    )
 
 
 _DOC_LABELS = {
@@ -613,9 +907,25 @@ def create_document(pid: int, doc_type: str = "document",
 
     label = _DOC_LABELS[doc_type]
     if not _ocr_click_label(pid, screenshot_path, label):
+        _trace(
+            "create_document",
+            False,
+            "FAILED",
+            fallback_used=True,
+            fallback_source="OCR_CREATE_DOCUMENT",
+            fallback_reason=f"Не удалось найти кнопку «{label}» через OCR.",
+        )
         raise RuntimeError(
             f"Не удалось найти кнопку «{label}» на стартовом экране через OCR"
         )
+    return _trace(
+        "create_document",
+        True,
+        "OCR",
+        fallback_used=True,
+        fallback_source="OCR_CREATE_DOCUMENT",
+        fallback_reason="Создание документа выполнено OCR-кликом на стартовом экране.",
+    )
 
 
 def click_toolbar_tab(pid: int, tab_name: str, positions: dict):
@@ -632,12 +942,30 @@ def click_toolbar_tab(pid: int, tab_name: str, positions: dict):
         выполняется on-demand OCR-клик по имени вкладки на свежем скриншоте.
         Ошибка поднимается только если fallback не смог найти вкладку.
     """
+    if _cdp_click_toolbar_tab(tab_name):
+        return _trace("click_toolbar_tab", True, "DOM_CDP")
+
     coords = positions.get(tab_name) if positions else None
     if not coords:
         # FALLBACK: если вкладка не попала в первичную калибровку, пробуем
         # свежий OCR-клик по имени вкладки прямо перед действием.
         if _ocr_click_toolbar_tab(pid, tab_name):
-            return
+            return _trace(
+                "click_toolbar_tab",
+                True,
+                "OCR",
+                fallback_used=True,
+                fallback_source="OCR_ON_DEMAND_TAB",
+                fallback_reason=f"DOM-клик вкладки «{tab_name}» недоступен; использован OCR fallback.",
+            )
+        _trace(
+            "click_toolbar_tab",
+            False,
+            "FAILED",
+            fallback_used=True,
+            fallback_source="TAB_FALLBACK_EXHAUSTED",
+            fallback_reason=f"Не удалось открыть вкладку «{tab_name}» ни DOM, ни OCR fallback.",
+        )
         raise RuntimeError(
             f"Координаты вкладки «{tab_name}» не откалиброваны. "
             f"Перед кликом вызовите calibrate_toolbar_tabs()."
@@ -646,6 +974,14 @@ def click_toolbar_tab(pid: int, tab_name: str, positions: dict):
     driver.activate_window(pid)
     rel_x, rel_y = coords
     driver.click_rel(pid, rel_x, rel_y)
+    return _trace(
+        "click_toolbar_tab",
+        True,
+        "COORDINATES",
+        fallback_used=True,
+        fallback_source="CALIBRATED_COORDINATES_TAB",
+        fallback_reason=f"DOM-клик вкладки «{tab_name}» недоступен; использован координатный fallback.",
+    )
 
 
 # Имена вкладок ленты в порядке отображения. Многословные («Совместная работа»)
