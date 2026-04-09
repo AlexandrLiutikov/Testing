@@ -326,6 +326,25 @@ def _cdp_click_selector(selector: str) -> bool:
         return False
 
 
+def _cdp_click_selector_in_editor_frame(selector: str) -> bool:
+    """Кликнуть по селектору внутри iframe `frameEditor` (основной путь для CEF-редактора)."""
+    result = _cdp_eval_in_editor_frame(
+        f"""
+  const el = doc.querySelector({json.dumps(selector)});
+  if (!el) return {{ok:false, reason:"not_found"}};
+  const style = window.getComputedStyle(el);
+  if (!style || style.display === "none" || style.visibility === "hidden") {{
+    return {{ok:false, reason:"hidden"}};
+  }}
+  const disabled = !!el.disabled || el.getAttribute("aria-disabled") === "true";
+  if (disabled) return {{ok:false, reason:"disabled"}};
+  el.click();
+  return {{ok:true}};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
+
+
 def _cdp_eval_in_editor_frame(expression_body: str):
     """Выполнить JS в DOM документа редактора внутри iframe `frameEditor`."""
     port = _read_devtools_port()
@@ -389,6 +408,13 @@ def _close_active_document_tab_via_cdp() -> bool:
 def _click_quick_access_button_via_cdp(button_key: str) -> bool:
     selectors = _QUICK_ACCESS_SELECTORS.get(button_key, [])
     for selector in selectors:
+        if _cdp_click_selector_in_editor_frame(selector):
+            logger.info(
+                "CDP click success for %s via iframe selector %s",
+                button_key,
+                selector,
+            )
+            return True
         if _cdp_click_selector(selector):
             logger.info("CDP click success for %s via selector %s", button_key, selector)
             return True
