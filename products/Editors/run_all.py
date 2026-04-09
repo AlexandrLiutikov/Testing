@@ -5,7 +5,7 @@
 и формирует сводный отчёт с RELEASE_DECISION.
 
 Использование:
-    python run_all.py                         # кейсы 1-5 (по умолчанию)
+    python run_all.py                         # кейсы 1-6 (по умолчанию)
     python run_all.py --cases 1 2             # только кейсы 1 и 2
     python run_all.py --cases 1 2 --editor-path "C:\\path\\to\\editors.exe"
 """
@@ -39,6 +39,7 @@ CASE_SCRIPTS = {
     "3": os.path.join("scenarios", "smoke", "3_Создание_документа_и_проверка_вкладок.py"),
     "4": os.path.join("scenarios", "smoke", "4_Ввод_текста_в_редакторе_документов.py"),
     "5": os.path.join("scenarios", "smoke", "5_Проверка_кнопок_Отменить_Повторить_Сохранить_docx.py"),
+    "6": os.path.join("scenarios", "smoke", "6_Открытие_файла_эталона_docx.py"),
 }
 
 AVAILABLE_CASES = sorted(CASE_SCRIPTS.keys())
@@ -252,6 +253,7 @@ def _generate_summary_html(
 
 {_decision_html(decision)}
 
+  <div class='table-wrap'>
   <table class='cases-table'>
     <thead>
       <tr>
@@ -268,6 +270,7 @@ def _generate_summary_html(
 {_case_rows_html(case_results)}
     </tbody>
   </table>
+  </div>
 
   <div class='footer'>
     JSON: results_all.json | CSV: results_all.csv

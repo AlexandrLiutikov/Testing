@@ -23,6 +23,45 @@ SMOKE_TEXT_ASSERT_TOKENS = [
     "1234567890",
 ]
 
+REFERENCE_DOC_OPEN_TOKENS = [
+    "Работа с текстом",
+    "параграф",
+    "буквица",
+]
+
+REFERENCE_DOC_PAGE_TOKENS = {
+    1: [
+        "Это особый колонтитул для первой страницы",
+        "Работа с текстом",
+        "Этот параграф в разделе",
+        "буквица",
+        "Страница 1 из 4",
+        "Страница 1 из4",
+    ],
+    2: [
+        "Работа с таблицами",
+        "Работа с формулами",
+        "ВСЕ ПРОПИСНЫЕ",
+        "Страница 2 из 4",
+        "Страница 2 из4",
+    ],
+    3: [
+        "Работа с диаграммами",
+        "Линейчатая диаграмма",
+        "Продажи",
+        "Работа с автофигурами",
+        "Промежуточная стадия",
+        "Страница 3 из 4",
+        "Страница 3 из4",
+    ],
+    4: [
+        "Этот колонтитул для четных страниц",
+        "Изображение для колонтитула",
+        "Страница 4 из 4",
+        "Страница 4 из4",
+    ],
+}
+
 
 def assert_window_exists(
     process_name: str = "editors",
@@ -34,6 +73,29 @@ def assert_window_exists(
         pid процесса или None если не найдено.
     """
     return wait_main_proc(process_name, timeout_sec)
+
+
+def assert_reference_document_opened(
+    screenshot_path: str,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что открыт эталонный документ по содержимому первой страницы."""
+    return assert_section_visible(
+        screenshot_path,
+        REFERENCE_DOC_OPEN_TOKENS,
+        need=2,
+    )
+
+
+def assert_reference_document_page_content(
+    screenshot_path: str,
+    page_index: int,
+) -> Tuple[bool, List[str]]:
+    """Проверить содержимое конкретной страницы эталонного документа."""
+    tokens = REFERENCE_DOC_PAGE_TOKENS.get(page_index, [])
+    if not tokens:
+        take_screenshot(screenshot_path)
+        return False, []
+    return assert_section_visible(screenshot_path, tokens, need=1)
 
 
 def assert_warning_visible(

@@ -769,6 +769,97 @@ def save_active_document(pid: int, allow_hotkey_fallback: bool = True) -> dict:
     )
 
 
+def click_zoom_to_page(pid: int) -> dict:
+    """Кликнуть в строке состояния кнопку «По размеру страницы»."""
+    driver = get_driver()
+    driver.activate_window(pid)
+
+    if _cdp_click_zoom_to_page():
+        return _trace("click_zoom_to_page", True, "DOM_CDP")
+
+    if _ocr_click_zoom_to_page_near_scale(pid):
+        return _trace(
+            "click_zoom_to_page",
+            True,
+            "OCR_STATUSBAR_ANCHOR",
+            fallback_used=True,
+            fallback_source="OCR_STATUSBAR_SCALE_ANCHOR",
+            fallback_reason=(
+                "DOM/CDP-клик недоступен, выполнен клик по иконке "
+                "«По размеру страницы» относительно якоря «Масштаб»."
+            ),
+        )
+
+    fd, screenshot_path = tempfile.mkstemp(prefix="zoom_to_page_", suffix=".png")
+    _os.close(fd)
+    try:
+        take_screenshot(screenshot_path)
+        if _ocr_click_label(pid, screenshot_path, "По размеру страницы"):
+            return _trace(
+                "click_zoom_to_page",
+                True,
+                "OCR",
+                fallback_used=True,
+                fallback_source="OCR_ZOOM_TO_PAGE",
+                fallback_reason=(
+                    "DOM/CDP-клик недоступен, выполнен OCR-клик по метке "
+                    "«По размеру страницы»."
+                ),
+            )
+    finally:
+        try:
+            _os.remove(screenshot_path)
+        except OSError:
+            pass
+
+    return _trace(
+        "click_zoom_to_page",
+        False,
+        "FAILED",
+        fallback_used=True,
+        fallback_source="ZOOM_TO_PAGE_CHAIN_EXHAUSTED",
+        fallback_reason="Не удалось выполнить клик «По размеру страницы» ни DOM, ни OCR.",
+    )
+
+
+def go_to_next_page(pid: int) -> dict:
+    """Перейти на следующую страницу документа."""
+    driver = get_driver()
+    driver.activate_window(pid)
+
+    scroll_trace = _cdp_scroll_next_page_via_vertical_scroll()
+    if scroll_trace.get("ok"):
+        return _trace("go_to_next_page", True, scroll_trace.get("mode", "DOM_VERTICAL_SCROLL"))
+
+    try:
+        driver.page_down(pid)
+        return _trace(
+            "go_to_next_page",
+            True,
+            "KEYBOARD",
+            fallback_used=True,
+            fallback_source="DOM_VERTICAL_SCROLL_UNAVAILABLE",
+            fallback_reason=(
+                "Не удалось надёжно сдвинуть страницу через id_vertical_scroll, "
+                "использован fallback PageDown."
+            ),
+            warnings=[{
+                "code": "NEXT_PAGE_KEYBOARD_FALLBACK",
+                "severity": "LOW",
+                "message": "Переход на следующую страницу выполнен через PageDown fallback.",
+            }],
+        )
+    except Exception as exc:
+        return _trace(
+            "go_to_next_page",
+            False,
+            "FAILED",
+            fallback_used=True,
+            fallback_source="NEXT_PAGE_CHAIN_EXHAUSTED",
+            fallback_reason=f"DOM-скролл и keyboard fallback недоступны: {exc}",
+        )
+
+
 def confirm_active_dialog(pid: int):
     """Подтвердить активный системный диалог клавишей Enter."""
     get_driver().confirm_dialog(pid)
@@ -857,6 +948,37 @@ _DOC_LABELS = {
     "spreadsheet":  "Таблица",
     "presentation": "Презентация",
 }
+
+
+def open_document_by_path(
+    editor_path: str,
+    document_path: str,
+    enable_debug: bool = True,
+) -> dict:
+    """Открыть документ через запуск редактора с путём к файлу."""
+    if not _os.path.isfile(document_path):
+        return _trace(
+            "open_document_by_path",
+            False,
+            "FAILED",
+            fallback_used=False,
+            fallback_reason=f"Файл не найден: {document_path}",
+        )
+
+    driver = get_driver()
+    driver.launch_document(editor_path, document_path, enable_debug=enable_debug)
+    return _trace(
+        "open_document_by_path",
+        True,
+        "LAUNCH_DEBUG" if enable_debug else "LAUNCH_STANDARD",
+        fallback_used=not enable_debug,
+        fallback_source="LAUNCH_STANDARD_NO_DEBUG" if not enable_debug else "",
+        fallback_reason=(
+            "Повторный запуск открытия документа без debug-флага."
+            if not enable_debug
+            else ""
+        ),
+    )
 
 
 def _ocr_click_label(pid: int, screenshot_path: str, query: str) -> bool:
@@ -1011,6 +1133,371 @@ def _ocr_click_toolbar_tab(pid: int, tab_name: str) -> bool:
     try:
         take_screenshot(screenshot_path)
         return _ocr_click_label(pid, screenshot_path, query)
+    finally:
+        try:
+            _os.remove(screenshot_path)
+        except OSError:
+            pass
+
+
+def _build_scroll_next_page_script(doc_ref: str) -> str:
+    return f"""
+  const d = {doc_ref};
+  if (!d) return {{ok:false, reason:'no_document'}};
+  const w = (d.defaultView || window);
+
+  const getWordControl = () => {{
+    const candidates = [
+      w.Asc && w.Asc.editor && w.Asc.editor.WordControl,
+      w.AscCommon && w.AscCommon.g_oWordControl,
+      w.editor && w.editor.WordControl,
+      w.g_oWordControl,
+    ];
+    for (const c of candidates) {{
+      if (c) return c;
+    }}
+    return null;
+  }};
+
+  const readCurrentPage = () => {{
+    try {{
+      const ctrl = getWordControl();
+      if (!ctrl) return null;
+      const docApi = ctrl.m_oDrawingDocument || ctrl.m_oLogicDocument || ctrl;
+      const probes = [
+        docApi && docApi.m_lCurrentPage,
+        docApi && docApi.m_nCurrentPage,
+        ctrl.m_lCurrentPage,
+        ctrl.m_nCurrentPage,
+      ];
+      for (const val of probes) {{
+        if (typeof val === 'number' && Number.isFinite(val)) return val;
+      }}
+    }} catch (e) {{
+      return null;
+    }}
+    return null;
+  }};
+
+  const apiScroll = () => {{
+    try {{
+      const ctrl = getWordControl();
+      const scrollApi = ctrl && ctrl.m_oScrollVerApi;
+      if (!scrollApi) return '';
+
+      if (typeof scrollApi.scrollByY === 'function') {{
+        scrollApi.scrollByY(520);
+        return 'DOM_VERTICAL_SCROLL_API';
+      }}
+      if (typeof scrollApi.scrollBy === 'function') {{
+        scrollApi.scrollBy(0, 520, false);
+        return 'DOM_VERTICAL_SCROLL_API';
+      }}
+      if (typeof scrollApi.scrollToY === 'function') {{
+        const cur = Number(scrollApi.posY || scrollApi.scrollTop || 0);
+        scrollApi.scrollToY(cur + 520, false);
+        return 'DOM_VERTICAL_SCROLL_API';
+      }}
+    }} catch (e) {{
+      return '';
+    }}
+    return '';
+  }};
+
+  const dragScroll = () => {{
+    const sc = d.getElementById('id_vertical_scroll');
+    if (!sc) return '';
+
+    const surface = sc.querySelector('canvas') || sc;
+    const r = surface.getBoundingClientRect();
+    if (!r || r.width < 2 || r.height < 2) return '';
+
+    const x = r.left + r.width * 0.5;
+    const yStart = r.top + r.height * 0.35;
+    const yEnd = r.top + r.height * 0.74;
+
+    try {{
+      const MouseEvt = w.MouseEvent || MouseEvent;
+      surface.dispatchEvent(
+        new MouseEvt('mousedown', {{
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 1,
+          clientX: x,
+          clientY: yStart,
+        }})
+      );
+      surface.dispatchEvent(
+        new MouseEvt('mousemove', {{
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 1,
+          clientX: x,
+          clientY: yEnd,
+        }})
+      );
+      surface.dispatchEvent(
+        new MouseEvt('mouseup', {{
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX: x,
+          clientY: yEnd,
+        }})
+      );
+      return 'DOM_VERTICAL_SCROLL_DRAG';
+    }} catch (e) {{
+      return '';
+    }}
+  }};
+
+  const wheelScroll = () => {{
+    const targets = [
+      d.getElementById('id_main_view'),
+      d.getElementById('id_viewer_overlay'),
+      d.getElementById('id_viewer'),
+      d.getElementById('id_vertical_scroll'),
+    ].filter(Boolean);
+    if (!targets.length) return '';
+    try {{
+      const WheelEvt = w.WheelEvent || WheelEvent;
+      for (const target of targets) {{
+        target.dispatchEvent(new WheelEvt('wheel', {{bubbles:true, cancelable:true, deltaY:360, deltaMode:0}}));
+        target.dispatchEvent(new WheelEvt('wheel', {{bubbles:true, cancelable:true, deltaY:420, deltaMode:0}}));
+      }}
+      return 'DOM_VERTICAL_SCROLL_WHEEL';
+    }} catch (e) {{
+      return '';
+    }}
+  }};
+
+  const before = readCurrentPage();
+  let usedMode = '';
+
+  const runOnce = () => {{
+    const methods = [apiScroll, dragScroll, wheelScroll];
+    for (const method of methods) {{
+      const mode = method();
+      if (mode) return mode;
+    }}
+    return '';
+  }};
+
+  for (let attempt = 0; attempt < 3; attempt++) {{
+    const mode = runOnce();
+    if (mode && !usedMode) usedMode = mode;
+    const after = readCurrentPage();
+    if (
+      typeof before === 'number' &&
+      Number.isFinite(before) &&
+      typeof after === 'number' &&
+      Number.isFinite(after) &&
+      after > before
+    ) {{
+      return {{ok:true, mode: usedMode || mode, before_page: before, after_page: after, page_moved: true}};
+    }}
+  }}
+
+  const after = readCurrentPage();
+  if (!usedMode) {{
+    return {{ok:false, reason:'vertical_scroll_not_available', before_page: before, after_page: after}};
+  }}
+
+  if (
+    typeof before === 'number' &&
+    Number.isFinite(before) &&
+    typeof after === 'number' &&
+    Number.isFinite(after)
+  ) {{
+    return {{
+      ok: after > before,
+      mode: usedMode,
+      before_page: before,
+      after_page: after,
+      page_moved: after > before,
+      reason: after > before ? '' : 'page_index_not_changed',
+    }};
+  }}
+
+  return {{
+    ok: true,
+    mode: usedMode,
+    before_page: before,
+    after_page: after,
+    page_moved: null,
+  }};
+"""
+
+
+def _cdp_scroll_next_page_via_vertical_scroll() -> dict:
+    """Перейти на следующую страницу через вертикальный скролл редактора."""
+    frame_result = _cdp_eval_in_editor_frame(_build_scroll_next_page_script("doc"))
+    if isinstance(frame_result, dict) and frame_result.get("ok"):
+        return {
+            "ok": True,
+            "mode": str(frame_result.get("mode") or "DOM_VERTICAL_SCROLL"),
+            "source": "editor_frame",
+        }
+
+    root_result = _cdp_eval_root(_build_scroll_next_page_script("document"))
+    if isinstance(root_result, dict) and root_result.get("ok"):
+        return {
+            "ok": True,
+            "mode": str(root_result.get("mode") or "DOM_VERTICAL_SCROLL"),
+            "source": "root",
+        }
+
+    return {"ok": False}
+
+
+def _cdp_click_zoom_to_page() -> bool:
+    """Кликнуть кнопку «По размеру страницы» через DOM/CDP."""
+    result = _cdp_eval_in_editor_frame(
+        """
+  const clickButton = (btn, source) => {
+    if (!btn) return false;
+    const style = window.getComputedStyle(btn);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = btn.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    btn.click();
+    return source;
+  };
+
+  const buttonSelectors = [
+    'button[title*="По размеру страницы"]',
+    'button[data-original-title*="По размеру страницы"]',
+    'button[title*="Fit Page"]',
+    'button[data-original-title*="Fit Page"]',
+    'button .btn-ic-zoomtopage',
+    '.btn-ic-zoomtopage',
+  ];
+  for (const selector of buttonSelectors) {
+    const nodes = Array.from(doc.querySelectorAll(selector));
+    for (const node of nodes) {
+      const btn = node.closest ? node.closest('button') : null;
+      const src = clickButton(btn, selector);
+      if (src) return {ok:true, source: src};
+    }
+  }
+
+  const iconSelectors = [
+    'use[href="#btn-ic-zoomtopage"]',
+    'use[xlink\\:href="#btn-ic-zoomtopage"]',
+    'svg.btn-ic-zoomtopage use',
+    'custom-icon.btn-ic-zoomtopage use',
+  ];
+  for (const selector of iconSelectors) {
+    const nodes = Array.from(doc.querySelectorAll(selector));
+    for (const icon of nodes) {
+      const btn = icon.closest ? icon.closest('button') : null;
+      const src = clickButton(btn, selector);
+      if (src) return {ok:true, source: src};
+    }
+  }
+
+  const captions = Array.from(doc.querySelectorAll('button, .btn'))
+    .filter(el => ((el.textContent || '').toLowerCase().includes('по размеру')
+      || (el.textContent || '').toLowerCase().includes('fit page')));
+  for (const el of captions) {
+    const btn = el.closest ? el.closest('button') : el;
+    const src = clickButton(btn, 'caption-match');
+    if (src) return {ok:true, source: src};
+  }
+
+  return {ok:false, reason:'zoom_to_page_control_not_found'};
+"""
+    )
+    if isinstance(result, dict) and result.get("ok"):
+        return True
+
+    result = _cdp_eval_root(
+        """
+  const clickButton = (btn, source) => {
+    if (!btn) return false;
+    const style = window.getComputedStyle(btn);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = btn.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return false;
+    btn.click();
+    return source;
+  };
+
+  const buttonSelectors = [
+    'button[title*="По размеру страницы"]',
+    'button[data-original-title*="По размеру страницы"]',
+    'button[title*="Fit Page"]',
+    'button[data-original-title*="Fit Page"]',
+    'button .btn-ic-zoomtopage',
+    '.btn-ic-zoomtopage',
+  ];
+  for (const selector of buttonSelectors) {
+    const nodes = Array.from(document.querySelectorAll(selector));
+    for (const node of nodes) {
+      const btn = node.closest ? node.closest('button') : null;
+      const src = clickButton(btn, selector);
+      if (src) return {ok:true, source: src};
+    }
+  }
+
+  const iconSelectors = [
+    'use[href="#btn-ic-zoomtopage"]',
+    'use[xlink\\:href="#btn-ic-zoomtopage"]',
+    'svg.btn-ic-zoomtopage use',
+    'custom-icon.btn-ic-zoomtopage use',
+  ];
+  for (const selector of iconSelectors) {
+    const nodes = Array.from(document.querySelectorAll(selector));
+    for (const icon of nodes) {
+      const btn = icon.closest ? icon.closest('button') : null;
+      const src = clickButton(btn, selector);
+      if (src) return {ok:true, source: src};
+    }
+  }
+
+  const captions = Array.from(document.querySelectorAll('button, .btn'))
+    .filter(el => ((el.textContent || '').toLowerCase().includes('по размеру')
+      || (el.textContent || '').toLowerCase().includes('fit page')));
+  for (const el of captions) {
+    const btn = el.closest ? el.closest('button') : el;
+    const src = clickButton(btn, 'caption-match');
+    if (src) return {ok:true, source: src};
+  }
+
+  return {ok:false, reason:'zoom_to_page_control_not_found'};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
+
+
+def _ocr_click_zoom_to_page_near_scale(pid: int) -> bool:
+    """Кликнуть иконку `btn-ic-zoomtopage` через якорь «Масштаб» в статус-баре."""
+    from PIL import Image
+    from shared.infra.ocr import find_token_bbox
+
+    fd, screenshot_path = tempfile.mkstemp(prefix="zoom_status_", suffix=".png")
+    _os.close(fd)
+    try:
+        take_screenshot(screenshot_path)
+        bbox = find_token_bbox(screenshot_path, "Масштаб")
+        if not bbox:
+            bbox = find_token_bbox(screenshot_path, "100%")
+        if not bbox:
+            return False
+
+        img = Image.open(screenshot_path)
+        width, height = img.size
+
+        # Кнопка fit-to-page расположена слева от текста «Масштаб ...».
+        target_x = max(0, int(bbox["left"] - width * 0.035))
+        target_y = min(height - 1, int(bbox["center_y"]))
+
+        driver = get_driver()
+        driver.activate_window(pid)
+        driver.click_rel(pid, target_x / width, target_y / height)
+        return True
     finally:
         try:
             _os.remove(screenshot_path)
