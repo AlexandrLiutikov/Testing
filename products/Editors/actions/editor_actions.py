@@ -825,8 +825,39 @@ def click_zoom_to_page(pid: int) -> dict:
 def go_to_next_page(pid: int) -> dict:
     """Перейти на следующую страницу документа."""
     driver = get_driver()
-    driver.page_down(pid)
-    return _trace("go_to_next_page", True, "KEYBOARD")
+    driver.activate_window(pid)
+
+    scroll_trace = _cdp_scroll_next_page_via_vertical_scroll()
+    if scroll_trace.get("ok"):
+        return _trace("go_to_next_page", True, scroll_trace.get("mode", "DOM_VERTICAL_SCROLL"))
+
+    try:
+        driver.page_down(pid)
+        return _trace(
+            "go_to_next_page",
+            True,
+            "KEYBOARD",
+            fallback_used=True,
+            fallback_source="DOM_VERTICAL_SCROLL_UNAVAILABLE",
+            fallback_reason=(
+                "Не удалось надёжно сдвинуть страницу через id_vertical_scroll, "
+                "использован fallback PageDown."
+            ),
+            warnings=[{
+                "code": "NEXT_PAGE_KEYBOARD_FALLBACK",
+                "severity": "LOW",
+                "message": "Переход на следующую страницу выполнен через PageDown fallback.",
+            }],
+        )
+    except Exception as exc:
+        return _trace(
+            "go_to_next_page",
+            False,
+            "FAILED",
+            fallback_used=True,
+            fallback_source="NEXT_PAGE_CHAIN_EXHAUSTED",
+            fallback_reason=f"DOM-скролл и keyboard fallback недоступны: {exc}",
+        )
 
 
 def confirm_active_dialog(pid: int):
@@ -1107,6 +1138,218 @@ def _ocr_click_toolbar_tab(pid: int, tab_name: str) -> bool:
             _os.remove(screenshot_path)
         except OSError:
             pass
+
+
+def _build_scroll_next_page_script(doc_ref: str) -> str:
+    return f"""
+  const d = {doc_ref};
+  if (!d) return {{ok:false, reason:'no_document'}};
+  const w = (d.defaultView || window);
+
+  const getWordControl = () => {{
+    const candidates = [
+      w.Asc && w.Asc.editor && w.Asc.editor.WordControl,
+      w.AscCommon && w.AscCommon.g_oWordControl,
+      w.editor && w.editor.WordControl,
+      w.g_oWordControl,
+    ];
+    for (const c of candidates) {{
+      if (c) return c;
+    }}
+    return null;
+  }};
+
+  const readCurrentPage = () => {{
+    try {{
+      const ctrl = getWordControl();
+      if (!ctrl) return null;
+      const docApi = ctrl.m_oDrawingDocument || ctrl.m_oLogicDocument || ctrl;
+      const probes = [
+        docApi && docApi.m_lCurrentPage,
+        docApi && docApi.m_nCurrentPage,
+        ctrl.m_lCurrentPage,
+        ctrl.m_nCurrentPage,
+      ];
+      for (const val of probes) {{
+        if (typeof val === 'number' && Number.isFinite(val)) return val;
+      }}
+    }} catch (e) {{
+      return null;
+    }}
+    return null;
+  }};
+
+  const apiScroll = () => {{
+    try {{
+      const ctrl = getWordControl();
+      const scrollApi = ctrl && ctrl.m_oScrollVerApi;
+      if (!scrollApi) return '';
+
+      if (typeof scrollApi.scrollByY === 'function') {{
+        scrollApi.scrollByY(520);
+        return 'DOM_VERTICAL_SCROLL_API';
+      }}
+      if (typeof scrollApi.scrollBy === 'function') {{
+        scrollApi.scrollBy(0, 520, false);
+        return 'DOM_VERTICAL_SCROLL_API';
+      }}
+      if (typeof scrollApi.scrollToY === 'function') {{
+        const cur = Number(scrollApi.posY || scrollApi.scrollTop || 0);
+        scrollApi.scrollToY(cur + 520, false);
+        return 'DOM_VERTICAL_SCROLL_API';
+      }}
+    }} catch (e) {{
+      return '';
+    }}
+    return '';
+  }};
+
+  const dragScroll = () => {{
+    const sc = d.getElementById('id_vertical_scroll');
+    if (!sc) return '';
+
+    const surface = sc.querySelector('canvas') || sc;
+    const r = surface.getBoundingClientRect();
+    if (!r || r.width < 2 || r.height < 2) return '';
+
+    const x = r.left + r.width * 0.5;
+    const yStart = r.top + r.height * 0.35;
+    const yEnd = r.top + r.height * 0.74;
+
+    try {{
+      const MouseEvt = w.MouseEvent || MouseEvent;
+      surface.dispatchEvent(
+        new MouseEvt('mousedown', {{
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 1,
+          clientX: x,
+          clientY: yStart,
+        }})
+      );
+      surface.dispatchEvent(
+        new MouseEvt('mousemove', {{
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          buttons: 1,
+          clientX: x,
+          clientY: yEnd,
+        }})
+      );
+      surface.dispatchEvent(
+        new MouseEvt('mouseup', {{
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientX: x,
+          clientY: yEnd,
+        }})
+      );
+      return 'DOM_VERTICAL_SCROLL_DRAG';
+    }} catch (e) {{
+      return '';
+    }}
+  }};
+
+  const wheelScroll = () => {{
+    const targets = [
+      d.getElementById('id_main_view'),
+      d.getElementById('id_viewer_overlay'),
+      d.getElementById('id_viewer'),
+      d.getElementById('id_vertical_scroll'),
+    ].filter(Boolean);
+    if (!targets.length) return '';
+    try {{
+      const WheelEvt = w.WheelEvent || WheelEvent;
+      for (const target of targets) {{
+        target.dispatchEvent(new WheelEvt('wheel', {{bubbles:true, cancelable:true, deltaY:360, deltaMode:0}}));
+        target.dispatchEvent(new WheelEvt('wheel', {{bubbles:true, cancelable:true, deltaY:420, deltaMode:0}}));
+      }}
+      return 'DOM_VERTICAL_SCROLL_WHEEL';
+    }} catch (e) {{
+      return '';
+    }}
+  }};
+
+  const before = readCurrentPage();
+  let usedMode = '';
+
+  const runOnce = () => {{
+    const methods = [apiScroll, dragScroll, wheelScroll];
+    for (const method of methods) {{
+      const mode = method();
+      if (mode) return mode;
+    }}
+    return '';
+  }};
+
+  for (let attempt = 0; attempt < 3; attempt++) {{
+    const mode = runOnce();
+    if (mode && !usedMode) usedMode = mode;
+    const after = readCurrentPage();
+    if (
+      typeof before === 'number' &&
+      Number.isFinite(before) &&
+      typeof after === 'number' &&
+      Number.isFinite(after) &&
+      after > before
+    ) {{
+      return {{ok:true, mode: usedMode || mode, before_page: before, after_page: after, page_moved: true}};
+    }}
+  }}
+
+  const after = readCurrentPage();
+  if (!usedMode) {{
+    return {{ok:false, reason:'vertical_scroll_not_available', before_page: before, after_page: after}};
+  }}
+
+  if (
+    typeof before === 'number' &&
+    Number.isFinite(before) &&
+    typeof after === 'number' &&
+    Number.isFinite(after)
+  ) {{
+    return {{
+      ok: after > before,
+      mode: usedMode,
+      before_page: before,
+      after_page: after,
+      page_moved: after > before,
+      reason: after > before ? '' : 'page_index_not_changed',
+    }};
+  }}
+
+  return {{
+    ok: true,
+    mode: usedMode,
+    before_page: before,
+    after_page: after,
+    page_moved: null,
+  }};
+"""
+
+
+def _cdp_scroll_next_page_via_vertical_scroll() -> dict:
+    """Перейти на следующую страницу через вертикальный скролл редактора."""
+    frame_result = _cdp_eval_in_editor_frame(_build_scroll_next_page_script("doc"))
+    if isinstance(frame_result, dict) and frame_result.get("ok"):
+        return {
+            "ok": True,
+            "mode": str(frame_result.get("mode") or "DOM_VERTICAL_SCROLL"),
+            "source": "editor_frame",
+        }
+
+    root_result = _cdp_eval_root(_build_scroll_next_page_script("document"))
+    if isinstance(root_result, dict) and root_result.get("ok"):
+        return {
+            "ok": True,
+            "mode": str(root_result.get("mode") or "DOM_VERTICAL_SCROLL"),
+            "source": "root",
+        }
+
+    return {"ok": False}
 
 
 def _cdp_click_zoom_to_page() -> bool:
