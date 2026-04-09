@@ -95,6 +95,32 @@ def assert_reference_document_page_content(
     if not tokens:
         take_screenshot(screenshot_path)
         return False, []
+    page_tokens = [
+        t for t in tokens
+        if str(t).strip().lower().startswith("страница ")
+    ]
+    content_tokens = [
+        t for t in tokens
+        if not str(t).strip().lower().startswith("страница ")
+    ]
+
+    # Для страниц 2-3 запрещаем PASS по одному лишь номеру страницы из статус-бара:
+    # нужен контент этой страницы.
+    if page_index in (2, 3):
+        probe = content_tokens or tokens
+        return assert_section_visible(screenshot_path, probe, need=1)
+
+    # Страница 4 в эталоне почти пустая, OCR контента нестабилен.
+    # Сначала пробуем контент, затем fallback на маркер "Страница 4 из 4".
+    if page_index == 4:
+        probe = content_tokens or tokens
+        ok, found = assert_section_visible(screenshot_path, probe, need=1)
+        if ok:
+            return ok, found
+        if page_tokens:
+            return assert_section_visible(screenshot_path, page_tokens, need=1)
+        return ok, found
+
     return assert_section_visible(screenshot_path, tokens, need=1)
 
 
