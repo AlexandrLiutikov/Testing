@@ -529,17 +529,17 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
 
     Возвращает True, если выполнен UI-клик или fallback.
     """
-    # Основной путь: CDP-клик по DOM-кнопке возврата из редактора.
-    # В desktop-режиме этот клик эквивалентен закрытию активного документа
-    # и устойчив к разрешению/DPI.
-    if _close_active_document_tab_via_cdp():
-        return True
-
-    from PIL import Image
-
     driver = get_driver()
     driver.activate_window(pid)
 
+    # Основной путь: нативный UIA-клик по `X` активной вкладки TabBar фрейма.
+    try:
+        if driver.click_current_tab_close_button(pid):
+            return True
+    except Exception:
+        pass
+
+    from PIL import Image
     fd, screenshot_path = tempfile.mkstemp(prefix="tab_close_", suffix=".png")
     _os.close(fd)
     clicked = False
