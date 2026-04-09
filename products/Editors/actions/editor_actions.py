@@ -7,10 +7,15 @@ OCR (`shared.infra.ocr.find_token_bbox`) на свежем скриншоте о
 зашиваются в код. Это единственный способ работать на любых разрешениях.
 """
 
-import time
+import base64
+import json
 import logging
-import tempfile
 import os as _os
+import socket
+import tempfile
+import time
+import urllib.parse
+import urllib.request
 
 from shared.drivers import get_driver
 from shared.infra.screenshots import take_screenshot
@@ -71,6 +76,264 @@ _QUICK_ACCESS_BUTTONS = {
     "redo": 2,
 }
 
+_QUICK_ACCESS_SELECTORS = {
+    "save": [
+        "#slot-btn-dt-save button",
+        "#slot-btn-dt-save",
+        "#id-toolbar-btn-save",
+    ],
+    "undo": [
+        "#slot-btn-dt-undo button",
+        "#slot-btn-dt-undo",
+        "#id-toolbar-btn-undo",
+    ],
+    "redo": [
+        "#slot-btn-dt-redo button",
+        "#slot-btn-dt-redo",
+        "#id-toolbar-btn-redo",
+    ],
+}
+
+
+def _devtools_active_port_path() -> str:
+    local_app_data = _os.environ.get("LOCALAPPDATA", "")
+    if not local_app_data:
+        return ""
+    return _os.path.join(
+        local_app_data,
+        "R7-Office",
+        "Editors",
+        "data",
+        "cache",
+        "DevToolsActivePort",
+    )
+
+
+def _read_devtools_port() -> int:
+    path = _devtools_active_port_path()
+    if not path or not _os.path.exists(path):
+        return 0
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+        return int(first_line)
+    except Exception:
+        return 0
+
+
+def _choose_cdp_target(port: int) -> str:
+    if port <= 0:
+        return ""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=1.5) as resp:
+            targets = json.loads(resp.read().decode("utf-8", errors="ignore"))
+    except Exception:
+        return ""
+    if not isinstance(targets, list):
+        return ""
+    candidates = []
+    for item in targets:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "page":
+            continue
+        ws_url = str(item.get("webSocketDebuggerUrl") or "")
+        if not ws_url:
+            continue
+        score = 0
+        url = str(item.get("url") or "")
+        title = str(item.get("title") or "")
+        if "desktop=true" in url:
+            score += 2
+        if "index.html" in url:
+            score += 1
+        if "Documents" in title or "Документ" in title:
+            score += 1
+        candidates.append((score, ws_url))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+class _CdpWsClient:
+    """Минимальный WebSocket-клиент для отправки CDP-команд без внешних зависимостей."""
+
+    def __init__(self, ws_url: str, timeout_sec: float = 2.0):
+        self.ws_url = ws_url
+        self.timeout_sec = timeout_sec
+        self.sock = None
+        self._next_id = 1
+
+    def __enter__(self):
+        self._connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+    def close(self) -> None:
+        if not self.sock:
+            return
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+        self.sock = None
+
+    def _read_http_headers(self) -> bytes:
+        data = b""
+        deadline = time.time() + self.timeout_sec
+        while b"\r\n\r\n" not in data and time.time() < deadline:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        return data
+
+    def _connect(self) -> None:
+        parsed = urllib.parse.urlparse(self.ws_url)
+        if parsed.scheme != "ws":
+            raise RuntimeError(f"Unsupported CDP websocket scheme: {parsed.scheme}")
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 80
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+
+        self.sock = socket.create_connection((host, port), timeout=self.timeout_sec)
+        self.sock.settimeout(self.timeout_sec)
+
+        sec_key = base64.b64encode(_os.urandom(16)).decode("ascii")
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {sec_key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n"
+            "\r\n"
+        )
+        self.sock.sendall(request.encode("ascii"))
+        headers = self._read_http_headers().decode("latin1", errors="ignore")
+        if " 101 " not in headers:
+            raise RuntimeError(f"WebSocket handshake failed: {headers[:120]}")
+
+    def _send_frame_text(self, text: str) -> None:
+        payload = text.encode("utf-8")
+        fin_opcode = 0x81
+        mask_bit = 0x80
+        header = bytearray([fin_opcode])
+        plen = len(payload)
+        if plen < 126:
+            header.append(mask_bit | plen)
+        elif plen <= 0xFFFF:
+            header.append(mask_bit | 126)
+            header.extend(plen.to_bytes(2, "big"))
+        else:
+            header.append(mask_bit | 127)
+            header.extend(plen.to_bytes(8, "big"))
+
+        mask_key = _os.urandom(4)
+        header.extend(mask_key)
+        masked = bytes(payload[i] ^ mask_key[i % 4] for i in range(plen))
+        self.sock.sendall(bytes(header) + masked)
+
+    def _recv_exact(self, n: int) -> bytes:
+        data = b""
+        while len(data) < n:
+            chunk = self.sock.recv(n - len(data))
+            if not chunk:
+                raise RuntimeError("WebSocket connection closed")
+            data += chunk
+        return data
+
+    def _recv_frame(self):
+        h = self._recv_exact(2)
+        b1, b2 = h[0], h[1]
+        opcode = b1 & 0x0F
+        masked = (b2 & 0x80) != 0
+        plen = b2 & 0x7F
+        if plen == 126:
+            plen = int.from_bytes(self._recv_exact(2), "big")
+        elif plen == 127:
+            plen = int.from_bytes(self._recv_exact(8), "big")
+        mask_key = self._recv_exact(4) if masked else b""
+        payload = self._recv_exact(plen) if plen else b""
+        if masked:
+            payload = bytes(payload[i] ^ mask_key[i % 4] for i in range(plen))
+        return opcode, payload
+
+    def call(self, method: str, params: dict):
+        msg_id = self._next_id
+        self._next_id += 1
+        self._send_frame_text(json.dumps({"id": msg_id, "method": method, "params": params}))
+        deadline = time.time() + self.timeout_sec
+        while time.time() < deadline:
+            opcode, payload = self._recv_frame()
+            if opcode == 0x9:  # ping
+                pong = bytearray([0x8A, 0x80])  # pong + empty masked payload
+                pong.extend(_os.urandom(4))
+                self.sock.sendall(bytes(pong))
+                continue
+            if opcode in (0x8, 0xA):  # close/pong
+                continue
+            if opcode != 0x1:
+                continue
+            data = json.loads(payload.decode("utf-8", errors="ignore"))
+            if data.get("id") == msg_id:
+                return data
+        raise TimeoutError(f"CDP response timeout for {method}")
+
+
+def _cdp_click_selector(selector: str) -> bool:
+    port = _read_devtools_port()
+    ws_url = _choose_cdp_target(port)
+    if not ws_url:
+        return False
+
+    script = f"""
+(() => {{
+  const el = document.querySelector({json.dumps(selector)});
+  if (!el) return {{ok:false, reason:"not_found"}};
+  const style = window.getComputedStyle(el);
+  if (!style || style.display === "none" || style.visibility === "hidden") {{
+    return {{ok:false, reason:"hidden"}};
+  }}
+  const disabled = !!el.disabled || el.getAttribute("aria-disabled") === "true";
+  if (disabled) return {{ok:false, reason:"disabled"}};
+  el.click();
+  return {{ok:true}};
+}})()
+"""
+    try:
+        with _CdpWsClient(ws_url, timeout_sec=2.0) as cdp:
+            result = cdp.call(
+                "Runtime.evaluate",
+                {
+                    "expression": script,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                },
+            )
+        value = (
+            result.get("result", {})
+            .get("result", {})
+            .get("value", {})
+        )
+        return bool(isinstance(value, dict) and value.get("ok"))
+    except Exception:
+        return False
+
+
+def _click_quick_access_button_via_cdp(button_key: str) -> bool:
+    selectors = _QUICK_ACCESS_SELECTORS.get(button_key, [])
+    for selector in selectors:
+        if _cdp_click_selector(selector):
+            logger.info("CDP click success for %s via selector %s", button_key, selector)
+            return True
+    return False
+
 
 def _click_quick_access_button(pid: int, button_key: str) -> bool:
     """Кликнуть по кнопке панели быстрого доступа слева от вкладки «Файл».
@@ -82,6 +345,11 @@ def _click_quick_access_button(pid: int, button_key: str) -> bool:
     """
     if button_key not in _QUICK_ACCESS_BUTTONS:
         raise ValueError(f"Неизвестная кнопка быстрого доступа: {button_key}")
+
+    # Основной путь: DOM-клик через CDP (debug-порт редактора).
+    # Это устойчиво к DPI/разрешению и не зависит от координат.
+    if _click_quick_access_button_via_cdp(button_key):
+        return True
 
     from PIL import Image
 
