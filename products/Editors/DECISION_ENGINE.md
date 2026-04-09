@@ -86,38 +86,37 @@ release_decision:
   verdict: GO_WITH_RISK
   
   reasons:
-    - "Все критические пути пройдены (запуск, открытие, сохранение, печать)"
-    - "1 сбой в UI-тесте со severity MEDIUM (смещение иконки вкладки)"
+    - "TEST_FAIL: шаг «Проверка вкладки Вставка» (severity MEDIUM)."
+    - "Run confidence: SUFFICIENT. 2 из 12 шагов имеют статус INFRA_FAIL/BLOCKED."
 
   risks:
-    - severity: MEDIUM
-      area: UI_LAYOUT
-      description: "Смещение иконки вкладки «Вставка» на 3px"
-      module: Editor
-      platform: Windows 11
-      impact: "Косметический дефект, функциональность не нарушена"
-
-  blocking_failures: []
+    - "MEDIUM / UI_LAYOUT: Смещение иконки вкладки «Вставка» на 3px"
 
   infra_issues:
-    - "Кейс 4: Tesseract timeout при проверке диалога сохранения (INFRA_FAIL)"
+    - "Шаг «Проверка диалога сохранения»: Tesseract timeout"
+
+  blocked_cases:
+    - "Шаг «Печать»: стенд без настроенного принтера"
+
+  warnings:
+    - "LOW: Обнаружен новый UI-элемент во вкладке «Вставка» (шаг 4)"
 
   recommendations:
-    - "Разрешить релиз"
-    - "Создать задачу на исправление смещения иконки (приоритет LOW)"
-    - "Повторить кейс 4 после настройки Tesseract"
-    - "Мониторить обратную связь по UI"
+    - "Разрешить релиз с учётом выявленных рисков."
+    - "Повторить прогон после устранения инфраструктурных ограничений."
+    - "Обновить UI-каталог/автотесты по зафиксированным предупреждениям."
 
   run_confidence: SUFFICIENT
-  run_confidence_detail: "1 INFRA_FAIL, 1 BLOCKED из 7 кейсов. Все critical paths покрыты."
+  run_confidence_detail: "2 из 12 шагов имеют статус INFRA_FAIL/BLOCKED; critical coverage: 10/10."
 
   stats:
-    total_cases: 7
-    passed: 5
+    total: 12
+    passed: 9
     test_failed: 1
     infra_failed: 1
     blocked: 1
-    critical_path_coverage: "5/5 (100%)"
+    warnings_total: 4
+    critical_path_coverage: "10/10"
 ```
 
 ---
@@ -136,6 +135,7 @@ release_decision:
 # --- Шаг 1: отделить типы сбоев ---
 # Для принятия решения учитываются ТОЛЬКО TEST_FAIL.
 # INFRA_FAIL и BLOCKED не являются продуктовыми сигналами.
+# warnings/fallback не являются FAIL-сигналом, но обязаны быть вынесены в отчёт.
 
 # --- Шаг 2: продуктовое решение (по TEST_FAIL) ---
 ЕСЛИ есть хотя бы один TEST_FAIL с severity CRITICAL или HIGH
@@ -183,6 +183,7 @@ release_decision:
 - **BLOCKED на critical path** — если BLOCKED кейс — единственный, покрывающий critical path, это `GO_WITH_RISK` с пометкой «путь не проверен» (см. раздел 7).
 - **INFRA_FAIL** — не учитывается как продуктовый сбой. Снижает `run_confidence`. При множественных `INFRA_FAIL` рекомендуется повторный прогон (см. раздел 8).
 - **INFRA_FAIL ≠ NO_GO** — инфраструктурный сбой **никогда** не приводит к продуктовому `NO_GO`. Вместо этого прогон маркируется как недостоверный.
+- **Warnings/Fallback** — не меняют вердикт напрямую, но обязаны отражаться в `release_decision.warnings` и в отчёте на уровне шагов.
 
 ---
 
@@ -311,7 +312,7 @@ infra_issues:
 Достоверность прогона — оценка того, можно ли на основании результатов прогона принимать решение о релизе.
 
 Прогон считается **достоверным**, если:
-- все critical paths покрыты хотя бы одним кейсом со статусом `PASS` или `TEST_FAIL`;
+- все critical paths покрыты хотя бы одним шагом со статусом `PASS` или `TEST_FAIL`;
 - доля `BLOCKED` + `INFRA_FAIL` не превышает пороговых значений;
 - инфраструктура работала штатно.
 
@@ -319,8 +320,8 @@ infra_issues:
 
 | Уровень | Условие | Можно ли принимать решение? |
 |---------|---------|----------------------------|
-| **FULL** | Все кейсы выполнены (`PASS` или `TEST_FAIL`), нет `BLOCKED` и `INFRA_FAIL` | Да, решение полностью обосновано |
-| **SUFFICIENT** | `BLOCKED` + `INFRA_FAIL` ≤ 20% кейсов, все critical paths покрыты | Да, с оговоркой о непроверенных областях |
+| **FULL** | Все шаги выполнены (`PASS` или `TEST_FAIL`), нет `BLOCKED` и `INFRA_FAIL` | Да, решение полностью обосновано |
+| **SUFFICIENT** | `BLOCKED` + `INFRA_FAIL` ≤ 20% шагов, все critical paths покрыты | Да, с оговоркой о непроверенных областях |
 | **DEGRADED** | `BLOCKED` + `INFRA_FAIL` > 20% но ≤ 50%, или 1 critical path не покрыт | `GO_WITH_RISK` — решение возможно, но прогон неполный |
 | **INSUFFICIENT** | `BLOCKED` + `INFRA_FAIL` > 50%, или ≥ 2 critical paths не покрыты | Решение **не может быть принято**. Требуется повторный прогон |
 
@@ -330,21 +331,22 @@ infra_issues:
 release_decision:
   verdict: GO_WITH_RISK
   run_confidence: SUFFICIENT
-  run_confidence_detail: "2 из 10 кейсов BLOCKED (стенд без принтера). Все critical paths покрыты."
+  run_confidence_detail: "2 из 10 шагов имеют статус INFRA_FAIL/BLOCKED. Все critical paths покрыты."
 
   reasons:
     - "Все критические пути пройдены"
   
   infra_issues:
-    - "Кейс 5 BLOCKED: принтер не настроен"
-    - "Кейс 8 INFRA_FAIL: Tesseract timeout"
+    - "Шаг 5 BLOCKED: принтер не настроен"
+    - "Шаг 8 INFRA_FAIL: Tesseract timeout"
 
   stats:
-    total_cases: 10
+    total: 10
     passed: 7
     test_failed: 1
     infra_failed: 1
     blocked: 1
+    warnings_total: 2
     critical_path_coverage: "5/5 (100%)"
 ```
 
