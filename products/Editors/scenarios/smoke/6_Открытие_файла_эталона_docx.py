@@ -208,6 +208,7 @@ def main():
         )
         page1_token_ok, page1_token_found = assert_reference_document_page_content(shot2, 1)
         zoom_expected = "Масштаб изменён, страница целиком помещается в рабочей области"
+        page1_match_msg = "Содержание и форма первой страницы совпадают с эталоном"
         zoom_ok = (
             bool(zoom_trace.get("ok"))
             and (zoom_label_ok or zoom_status_ok)
@@ -227,7 +228,7 @@ def main():
             _attach_action_trace(step, zoom_trace, "click_zoom_to_page")
             step.check(
                 condition=zoom_ok,
-                pass_msg=zoom_expected,
+                pass_msg=f"{zoom_expected}. {page1_match_msg}.",
                 fail_msg=(
                     "Не подтверждено отображение страницы 1 целиком после команды "
                     f"«По размеру страницы». Маркеры full-page: "
