@@ -92,6 +92,10 @@ class BaseDriver(ABC):
             "close_current_tab не реализован для текущей платформы"
         )
 
+    def page_down(self, pid: int) -> None:
+        """Перейти на следующую страницу документа (обычно PageDown)."""
+        raise NotImplementedError("page_down не реализован для текущей платформы")
+
     def click_current_tab_close_button(self, pid: int) -> bool:
         """Кликнуть по UI-кнопке `X` активной вкладки документа.
 
@@ -141,4 +145,13 @@ class BaseDriver(ABC):
             editor_path: путь к редактору.
             enable_debug: запускать ли с debug-флагом (если поддерживается).
         """
+        raise NotImplementedError
+
+    @staticmethod
+    def launch_document(
+        editor_path: str,
+        document_path: str,
+        enable_debug: bool = True,
+    ) -> None:
+        """Открыть документ через запуск редактора с путём к файлу."""
         raise NotImplementedError

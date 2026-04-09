@@ -400,6 +400,12 @@ Write-Output "NOTFOUND"
         self._send_ctrl_combo(0x73)  # F4
         time.sleep(0.4)
 
+    def page_down(self, pid: int) -> None:
+        """Прокрутить документ на следующую страницу (PageDown)."""
+        self.activate_window(pid)
+        self._tap_key(0x22)  # VK_NEXT / PageDown
+        time.sleep(0.3)
+
     def click_current_tab_close_button(self, pid: int) -> bool:
         """Кликнуть по `X` активной вкладки через UIAutomation TabBar."""
         ps = f"""
@@ -564,6 +570,20 @@ Write-Output "FALLBACK"
             subprocess.Popen([editor_path, "--ascdesktop-support-debug-info"])
             return
         subprocess.Popen([editor_path])
+
+    @staticmethod
+    def launch_document(
+        editor_path: str,
+        document_path: str,
+        enable_debug: bool = True,
+    ) -> None:
+        """Открыть документ, передав путь к файлу в аргументах запуска."""
+        if enable_debug:
+            subprocess.Popen(
+                [editor_path, "--ascdesktop-support-debug-info", document_path]
+            )
+            return
+        subprocess.Popen([editor_path, document_path])
 
     # ---------------------------------------------------------------
     # Keyboard / clipboard helpers
