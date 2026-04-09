@@ -326,6 +326,66 @@ def _cdp_click_selector(selector: str) -> bool:
         return False
 
 
+def _cdp_eval_in_editor_frame(expression_body: str):
+    """Выполнить JS в DOM документа редактора внутри iframe `frameEditor`."""
+    port = _read_devtools_port()
+    ws_url = _choose_cdp_target(port)
+    if not ws_url:
+        return None
+
+    script = f"""
+(() => {{
+  const frame = document.querySelector('iframe[name="frameEditor"]') || document.querySelector('iframe');
+  if (!frame) return {{ok:false, reason:"no_iframe"}};
+  let doc = null;
+  try {{
+    doc = frame.contentWindow && frame.contentWindow.document;
+  }} catch (e) {{
+    return {{ok:false, reason:"frame_access_error", error:String(e)}};
+  }}
+  if (!doc) return {{ok:false, reason:"no_frame_doc"}};
+  {expression_body}
+}})()
+"""
+    try:
+        with _CdpWsClient(ws_url, timeout_sec=2.0) as cdp:
+            result = cdp.call(
+                "Runtime.evaluate",
+                {
+                    "expression": script,
+                    "returnByValue": True,
+                    "awaitPromise": True,
+                },
+            )
+        return (
+            result.get("result", {})
+            .get("result", {})
+            .get("value", {})
+        )
+    except Exception:
+        return None
+
+
+def _close_active_document_tab_via_cdp() -> bool:
+    """Закрыть документ через DOM-контрол внутри редактора (CDP-first)."""
+    result = _cdp_eval_in_editor_frame(
+        """
+  const btn = doc.querySelector('#btn-go-back');
+  if (!btn) return {ok:false, reason:"btn_go_back_not_found"};
+  const style = window.getComputedStyle(btn);
+  if (!style || style.display === "none" || style.visibility === "hidden") {
+    return {ok:false, reason:"btn_go_back_hidden"};
+  }
+  btn.click();
+  return {ok:true, source:"btn_go_back"};
+"""
+    )
+    ok = bool(isinstance(result, dict) and result.get("ok"))
+    if ok:
+        logger.info("CDP close-tab success via #btn-go-back")
+    return ok
+
+
 def _click_quick_access_button_via_cdp(button_key: str) -> bool:
     selectors = _QUICK_ACCESS_SELECTORS.get(button_key, [])
     for selector in selectors:
@@ -443,6 +503,12 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
 
     Возвращает True, если выполнен UI-клик или fallback.
     """
+    # Основной путь: CDP-клик по DOM-кнопке возврата из редактора.
+    # В desktop-режиме этот клик эквивалентен закрытию активного документа
+    # и устойчив к разрешению/DPI.
+    if _close_active_document_tab_via_cdp():
+        return True
+
     from PIL import Image
 
     driver = get_driver()
@@ -450,6 +516,7 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
 
     fd, screenshot_path = tempfile.mkstemp(prefix="tab_close_", suffix=".png")
     _os.close(fd)
+    clicked = False
     try:
         take_screenshot(screenshot_path)
         img = Image.open(screenshot_path)
@@ -467,12 +534,15 @@ def close_active_document_tab(pid: int, allow_hotkey_fallback: bool = True) -> b
             target_y = int(rel_y * height)
             driver.click_rel(pid, target_x / width, target_y / height)
             time.sleep(0.15)
-        return True
+            clicked = True
     finally:
         try:
             _os.remove(screenshot_path)
         except OSError:
             pass
+
+    if clicked:
+        return True
 
     if not allow_hotkey_fallback:
         return False
