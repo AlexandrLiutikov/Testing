@@ -96,6 +96,10 @@ class BaseDriver(ABC):
         """Перейти на следующую страницу документа (обычно PageDown)."""
         raise NotImplementedError("page_down не реализован для текущей платформы")
 
+    def scroll_next_page(self, pid: int) -> None:
+        """Прокрутить документ на следующую страницу колесом мыши."""
+        raise NotImplementedError("scroll_next_page не реализован для текущей платформы")
+
     def click_current_tab_close_button(self, pid: int) -> bool:
         """Кликнуть по UI-кнопке `X` активной вкладки документа.
 

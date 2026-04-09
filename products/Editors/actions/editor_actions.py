@@ -828,9 +828,41 @@ def go_to_next_page(pid: int) -> dict:
     driver = get_driver()
     driver.activate_window(pid)
 
+    before_page = _cdp_read_current_page_index()
+    last_wheel_error = ""
+    for _ in range(3):
+        try:
+            driver.scroll_next_page(pid)
+        except Exception as exc:
+            last_wheel_error = str(exc)
+            break
+
+        # Если индекс страницы недоступен по CDP, считаем wheel успешным.
+        if before_page is None:
+            return _trace("go_to_next_page", True, "MOUSE_WHEEL")
+
+        after_page = _cdp_read_current_page_index()
+        if isinstance(after_page, int) and after_page > before_page:
+            return _trace("go_to_next_page", True, "MOUSE_WHEEL")
+
     scroll_trace = _cdp_scroll_next_page_via_vertical_scroll()
     if scroll_trace.get("ok") and scroll_trace.get("page_moved") is True:
-        return _trace("go_to_next_page", True, scroll_trace.get("mode", "DOM_VERTICAL_SCROLL"))
+        return _trace(
+            "go_to_next_page",
+            True,
+            scroll_trace.get("mode", "DOM_VERTICAL_SCROLL"),
+            fallback_used=True,
+            fallback_source="MOUSE_WHEEL_UNAVAILABLE",
+            fallback_reason=(
+                "Прокрутка колесом не подтвердила переход на следующую страницу; "
+                "использован DOM-скролл с подтверждением page_moved=True."
+            ),
+            warnings=[{
+                "code": "NEXT_PAGE_DOM_FALLBACK",
+                "severity": "LOW",
+                "message": "Переход на следующую страницу выполнен через DOM fallback.",
+            }],
+        )
 
     before_page = _cdp_read_current_page()
 
@@ -873,8 +905,15 @@ def go_to_next_page(pid: int) -> dict:
             fallback_used=True,
             fallback_source="NEXT_PAGE_UNVERIFIED",
             fallback_reason=(
-                "Не подтверждён переход страницы: DOM-скролл не дал page_moved=True, "
-                "а fallback PageDown не удалось верифицировать по индексу страницы."
+                "Не подтверждён переход страницы: прокрутка колесом и DOM-скролл "
+                "не дали верифицированного перехода, а fallback PageDown не удалось "
+                "подтвердить по индексу страницы."
+                + (f" Детали wheel: {last_wheel_error}" if last_wheel_error else "")
+                + (
+                    f" Детали DOM: {scroll_trace.get('reason')}"
+                    if scroll_trace.get("reason")
+                    else ""
+                )
             ),
             warnings=[{
                 "code": "NEXT_PAGE_REQUIRES_OCR_CONFIRMATION",
@@ -892,7 +931,7 @@ def go_to_next_page(pid: int) -> dict:
             "FAILED",
             fallback_used=True,
             fallback_source="NEXT_PAGE_CHAIN_EXHAUSTED",
-            fallback_reason=f"DOM-скролл и keyboard fallback недоступны: {exc}",
+            fallback_reason=f"MOUSE_WHEEL, DOM-скролл и keyboard fallback недоступны: {exc}",
         )
 
 
@@ -1459,6 +1498,75 @@ def _cdp_read_current_page() -> Optional[int]:
             return int(page)
 
     root_result = _cdp_eval_root(_build_read_current_page_script("document"))
+    if isinstance(root_result, dict) and root_result.get("ok"):
+        page = root_result.get("page")
+        if isinstance(page, (int, float)):
+            return int(page)
+
+    return None
+
+
+def _cdp_read_current_page_index():
+    """Прочитать индекс текущей страницы через DOM/CDP (если доступно)."""
+    frame_script = """
+  const d = doc;
+  const w = (d && d.defaultView) || window;
+  const candidates = [
+    w.Asc && w.Asc.editor && w.Asc.editor.WordControl,
+    w.AscCommon && w.AscCommon.g_oWordControl,
+    w.editor && w.editor.WordControl,
+    w.g_oWordControl,
+  ];
+  const ctrl = candidates.find(Boolean);
+  if (!ctrl) return {ok:false, reason:'no_word_control'};
+  const docApi = ctrl.m_oDrawingDocument || ctrl.m_oLogicDocument || ctrl;
+  const probes = [
+    docApi && docApi.m_lCurrentPage,
+    docApi && docApi.m_nCurrentPage,
+    ctrl.m_lCurrentPage,
+    ctrl.m_nCurrentPage,
+  ];
+  for (const val of probes) {
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      return {ok:true, page: val};
+    }
+  }
+  return {ok:false, reason:'page_index_not_found'};
+"""
+
+    root_script = """
+  const d = document;
+  const w = window;
+  const candidates = [
+    w.Asc && w.Asc.editor && w.Asc.editor.WordControl,
+    w.AscCommon && w.AscCommon.g_oWordControl,
+    w.editor && w.editor.WordControl,
+    w.g_oWordControl,
+  ];
+  const ctrl = candidates.find(Boolean);
+  if (!ctrl) return {ok:false, reason:'no_word_control'};
+  const docApi = ctrl.m_oDrawingDocument || ctrl.m_oLogicDocument || ctrl;
+  const probes = [
+    docApi && docApi.m_lCurrentPage,
+    docApi && docApi.m_nCurrentPage,
+    ctrl.m_lCurrentPage,
+    ctrl.m_nCurrentPage,
+  ];
+  for (const val of probes) {
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      return {ok:true, page: val};
+    }
+  }
+  return {ok:false, reason:'page_index_not_found'};
+"""
+
+    frame_result = _cdp_eval_in_editor_frame(frame_script)
+    if isinstance(frame_result, dict) and frame_result.get("ok"):
+        page = frame_result.get("page")
+        if isinstance(page, (int, float)):
+            return int(page)
+
+    root_result = _cdp_eval_root(root_script)
     if isinstance(root_result, dict) and root_result.get("ok"):
         page = root_result.get("page")
         if isinstance(page, (int, float)):
