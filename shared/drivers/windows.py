@@ -492,7 +492,9 @@ Write-Output "FALLBACK"
 
     @staticmethod
     def launch_editor(editor_path: str) -> None:
-        subprocess.Popen([editor_path])
+        # Для устойчивой автоматизации CEF-UI включаем debug-интерфейс.
+        # Это открывает локальный CDP-порт, который используют semantic actions.
+        subprocess.Popen([editor_path, "--ascdesktop-support-debug-info"])
 
     # ---------------------------------------------------------------
     # Keyboard / clipboard helpers
