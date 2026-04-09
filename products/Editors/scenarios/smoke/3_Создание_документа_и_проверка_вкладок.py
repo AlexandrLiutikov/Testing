@@ -8,6 +8,7 @@
 
 import argparse
 import os
+import re
 import sys
 
 # --- Корень проекта в sys.path для импортов shared/ ---
@@ -17,7 +18,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from shared.infra import CaseRunner, StepVerifier, capture_step, DurationTimer
+from shared.infra import CaseRunner, StepVerifier, capture_step
 from shared.infra.waits import wait_main_proc, wait_until
 from shared.drivers import get_driver
 
@@ -25,10 +26,16 @@ from products.Editors.actions.editor_actions import (
     create_document,
     click_toolbar_tab,
     calibrate_toolbar_tabs,
+    list_toolbar_tabs_dom,
 )
 from products.Editors.assertions.editor_assertions import (
     assert_document_created,
     assert_tab_active,
+)
+from products.Editors.assertions.ui_catalog import (
+    TOOLBAR_TABS,
+    diff_ui_items,
+    toolbar_tab_names,
 )
 
 
@@ -41,17 +48,35 @@ CASE_META = {
 }
 
 
-TABS_PLAN = [
-    (2, "Файл", "Вкладка «Файл» активна. Открыто меню «Сведения о документе»", ["Сведения", "Сохранить как", "Скачать как", "Версия"], 2),
-    (3, "Вставка", "Вкладка «Вставка» активна, подчёркнута синей линией", ["Таблица", "Изображение", "Диаграмма", "Колонтитулы"], 2),
-    (4, "Рисование", "Вкладка «Рисование» активна, подчёркнута синей линией", ["Выделить", "Выбрать", "Перо", "Маркер", "Ластик"], 1),
-    (5, "Макет", "Вкладка «Макет» активна, подчёркнута синей линией", ["Поля", "Ориентация", "Размер", "Колонки"], 2),
-    (6, "Ссылки", "Вкладка «Ссылки» активна, подчёркнута синей линией", ["Оглавление", "Сноска", "Закладка", "Гиперссылка"], 2),
-    (7, "Совместная работа", "Вкладка «Совместная работа» активна, подчёркнута синей линией", ["Комментарий", "Сравнить"], 1),
-    (8, "Защита", "Вкладка «Защита» активна, подчёркнута синей линией", ["Зашифровать", "Подпись"], 1),
-    (9, "Вид", "Вкладка «Вид» активна, подчёркнута синей линией", ["Масштаб", "Линейка", "Непечатаемые"], 1),
-    (10, "Плагины", "Вкладка «Плагины» активна, подчёркнута синей линией", ["Макросы", "Менеджер"], 1),
-]
+_TAB_EXPECTED_TEXT = {
+    "Файл": "Вкладка «Файл» активна. Открыто меню «Сведения о документе»",
+    "Вставка": "Вкладка «Вставка» активна, подчёркнута синей линией",
+    "Рисование": "Вкладка «Рисование» активна, подчёркнута синей линией",
+    "Макет": "Вкладка «Макет» активна, подчёркнута синей линией",
+    "Ссылки": "Вкладка «Ссылки» активна, подчёркнута синей линией",
+    "Совместная работа": "Вкладка «Совместная работа» активна, подчёркнута синей линией",
+    "Защита": "Вкладка «Защита» активна, подчёркнута синей линией",
+    "Вид": "Вкладка «Вид» активна, подчёркнута синей линией",
+    "Плагины": "Вкладка «Плагины» активна, подчёркнута синей линией",
+}
+
+
+def _build_tabs_plan():
+    plan = []
+    step_num = 2
+    for item in TOOLBAR_TABS:
+        name = item["name"]
+        required = list(item.get("required", []))
+        optional = list(item.get("optional", []))
+        need = int(item.get("need", max(1, len(required))))
+        tokens = required + optional
+        expected = _TAB_EXPECTED_TEXT.get(name, f"Вкладка «{name}» активна.")
+        plan.append((step_num, name, expected, tokens, need))
+        step_num += 1
+    return plan
+
+
+TABS_PLAN = _build_tabs_plan()
 
 
 def _add_blocked_tabs(runner, reason):
@@ -68,9 +93,71 @@ def _add_blocked_tabs(runner, reason):
         )
 
 
+def _attach_action_trace(step, trace: dict, action_name: str):
+    if not trace:
+        return
+
+    if trace.get("fallback_used"):
+        step.set_fallback(
+            trace.get("fallback_source", ""),
+            trace.get("fallback_reason", ""),
+        )
+
+    mode = str(trace.get("mode", "")).strip()
+    if mode and mode not in ("DOM_CDP", "DOM_FOCUS"):
+        step.add_warning(
+            code=f"{action_name.upper()}_MODE",
+            severity="LOW",
+            message=f"Action выполнился в режиме {mode}, а не в DOM primary.",
+        )
+
+    for w in trace.get("warnings", []) or []:
+        step.add_warning(
+            code=w.get("code", "ACTION_WARNING"),
+            severity=w.get("severity", "LOW"),
+            message=w.get("message", ""),
+        )
+
+
+def _toolbar_drift_warnings():
+    observed_raw = list_toolbar_tabs_dom()
+    if not observed_raw:
+        return []
+
+    observed = []
+    for item in observed_raw:
+        text = " ".join(str(item).split())
+        if not text:
+            continue
+        if len(text) > 40:
+            continue
+        if not re.fullmatch(r"[A-Za-zА-Яа-яЁё\-\s]{2,40}", text):
+            continue
+        observed.append(text)
+
+    if not observed:
+        return []
+
+    drift = diff_ui_items(observed, toolbar_tab_names())
+    out = []
+    for item in drift.get("extra", [])[:6]:
+        out.append({
+            "code": "UI_NEW_ELEMENT",
+            "severity": "LOW",
+            "message": f"Обнаружена новая вкладка/элемент панели: «{item}».",
+        })
+    for item in drift.get("missing", [])[:6]:
+        out.append({
+            "code": "UI_MISSING_ELEMENT",
+            "severity": "LOW",
+            "message": f"Ожидаемая вкладка «{item}» не обнаружена в DOM-каталоге.",
+        })
+    return out
+
+
 def _run_tab_step(runner, pid, tab_data, positions=None):
     step_num, tab_name, expected, tokens, need = tab_data
-    click_toolbar_tab(pid, tab_name, positions=positions)
+    tab_trace = click_toolbar_tab(pid, tab_name, positions=positions)
     shot = capture_step(runner.run_dir, step_num, f"tab_{step_num}", activate_driver=get_driver(), pid=pid)
     ok, _ = assert_tab_active(shot, tab_name, tokens, need)
 
@@ -83,6 +170,13 @@ def _run_tab_step(runner, pid, tab_data, positions=None):
         failure_area="CORE_FUNCTION",
     ) as step:
         step.screenshot(shot)
+        _attach_action_trace(step, tab_trace, "click_toolbar_tab")
+        for w in _toolbar_drift_warnings():
+            step.add_warning(
+                code=w["code"],
+                severity=w["severity"],
+                message=w["message"],
+            )
         step.check(
             condition=ok,
             pass_msg=f"Вкладка «{tab_name}» активна, содержимое панели отображается",
@@ -127,8 +221,7 @@ def main():
 
             driver.activate_window(pid)
 
-            step_timer = DurationTimer()
-            create_document(pid, "document")
+            create_trace = create_document(pid, "document")
 
             new_pid = wait_main_proc("editors", 3)
             if new_pid:
@@ -158,30 +251,29 @@ def main():
             )
             created_ok = ready and last_probe_ok
 
-            if created_ok:
-                runner.add_step(
-                    step_num=1,
-                    step_name="Создание нового документа",
-                    status="PASS",
-                    expected="Новый документ создан, вкладка «Главная» активна",
-                    actual="Новый документ создан, элементы вкладки «Главная» отображаются",
-                    screenshot=s1_path,
-                    duration_ms=step_timer.elapsed_ms(),
+            with StepVerifier(
+                runner,
+                step_num=1,
+                step_name="Создание нового документа",
+                expected="Новый документ создан, вкладка «Главная» активна",
+                severity="HIGH",
+                failure_area="CORE_FUNCTION",
+            ) as step:
+                step.screenshot(s1_path)
+                _attach_action_trace(step, create_trace, "create_document")
+                for w in _toolbar_drift_warnings():
+                    step.add_warning(
+                        code=w["code"],
+                        severity=w["severity"],
+                        message=w["message"],
+                    )
+                step.check(
+                    condition=created_ok,
+                    pass_msg="Новый документ создан, элементы вкладки «Главная» отображаются",
+                    fail_msg="Документ не создан или панель инструментов не отображается",
                 )
-            else:
-                runner.add_step(
-                    step_num=1,
-                    step_name="Создание нового документа",
-                    status="FAIL",
-                    expected="Новый документ создан, вкладка «Главная» активна",
-                    actual="Документ не создан или панель инструментов не отображается",
-                    screenshot=s1_path,
-                    duration_ms=step_timer.elapsed_ms(),
-                    failure_type="TEST_FAIL",
-                    failure_severity="HIGH",
-                    failure_area="CORE_FUNCTION",
-                    failure_detail="Не удалось создать новый документ из стартового экрана",
-                )
+
+            if not created_ok:
                 _add_blocked_tabs(
                     runner,
                     "Проверка вкладок заблокирована, потому что документ не создан.",

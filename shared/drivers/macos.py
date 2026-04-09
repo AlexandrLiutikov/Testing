@@ -37,5 +37,5 @@ class MacOSDriver(BaseDriver):
         raise NotImplementedError("MacOSDriver.kill_editors — ещё не реализован")
 
     @staticmethod
-    def launch_editor(editor_path: str) -> None:
+    def launch_editor(editor_path: str, enable_debug: bool = True) -> None:
         raise NotImplementedError("MacOSDriver.launch_editor — ещё не реализован")

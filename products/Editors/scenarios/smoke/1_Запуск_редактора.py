@@ -69,7 +69,30 @@ def main():
         # ---------------------------------------------------------------
         # Lifecycle: kill -> launch -> detect main window
         # ---------------------------------------------------------------
-        pid = app_lifecycle(args.editor_path)
+        try:
+            pid, launch_info = app_lifecycle(args.editor_path, return_info=True)
+        except Exception as exc:
+            err_shot = capture_step(runner.run_dir, 0, "launch_failed")
+            runner.add_step(
+                step_num=0,
+                step_name="Запуск редактора",
+                status="FAIL",
+                expected="Редактор запускается и отображает главное окно",
+                actual="Не удалось запустить редактор ни в debug-, ни в standard-режиме",
+                screenshot=err_shot,
+                failure_type="INFRA_FAIL",
+                failure_severity="MEDIUM",
+                failure_area="INFRASTRUCTURE",
+                failure_detail=str(exc),
+                fallback_source="LAUNCH_NO_DEBUG",
+                fallback_reason="Исчерпаны попытки debug->standard запуска редактора.",
+                warnings=[{
+                    "code": "LAUNCH_DEBUG_FALLBACK_EXHAUSTED",
+                    "severity": "MEDIUM",
+                    "message": "Запуск редактора не удался после цепочки debug->standard.",
+                }],
+            )
+            return
 
         # =================================================================
         # Шаг 1: Проверка - окно редактора появилось
@@ -85,6 +108,19 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(s1_path)
+            if launch_info.get("fallback_used"):
+                step.set_fallback(
+                    launch_info.get("fallback_source", "LAUNCH_NO_DEBUG"),
+                    launch_info.get("fallback_reason", ""),
+                )
+                step.add_warning(
+                    code="LAUNCH_DEBUG_FALLBACK",
+                    severity="LOW",
+                    message=(
+                        "Редактор запущен после fallback-цепочки "
+                        "debug -> standard (без debug-флага)."
+                    ),
+                )
             step.check(
                 condition=pid is not None,
                 pass_msg="Окно редактора найдено, процесс активен",

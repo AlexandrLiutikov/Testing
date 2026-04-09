@@ -28,7 +28,9 @@ from shared.drivers import get_driver
 # === Продуктовый слой: actions ===
 from products.Editors.actions.editor_actions import (
     click_menu,
+    consume_action_trace,
     dismiss_collab_popup,
+    list_start_menu_items_dom,
 )
 
 # === Продуктовый слой: assertions ===
@@ -36,6 +38,10 @@ from products.Editors.assertions.editor_assertions import (
     assert_section_visible,
     assert_popup_visible,
     assert_popup_closed,
+)
+from products.Editors.assertions.ui_catalog import (
+    START_MENU_EXPECTED,
+    diff_ui_items,
 )
 
 
@@ -50,6 +56,56 @@ CASE_META = {
     "risk_level": "HIGH",
     "critical_path": True,
 }
+
+
+def _attach_action_trace(step, trace: dict, action_name: str):
+    """Пробросить fallback/warnings из action-трассировки в шаг отчёта."""
+    if not trace:
+        trace = consume_action_trace(action_name) or {}
+    if not trace:
+        return
+
+    if trace.get("fallback_used"):
+        step.set_fallback(
+            trace.get("fallback_source", ""),
+            trace.get("fallback_reason", ""),
+        )
+
+    mode = trace.get("mode", "")
+    if mode and mode not in ("DOM_CDP", "DOM_FOCUS"):
+        step.add_warning(
+            code=f"{action_name.upper()}_MODE",
+            severity="LOW",
+            message=f"Action выполнился в режиме {mode}, а не в DOM primary.",
+        )
+
+    for w in trace.get("warnings", []) or []:
+        step.add_warning(
+            code=w.get("code", "ACTION_WARNING"),
+            severity=w.get("severity", "LOW"),
+            message=w.get("message", ""),
+        )
+
+
+def _menu_drift_warnings():
+    observed = list_start_menu_items_dom()
+    if not observed:
+        return []
+    drift = diff_ui_items(observed, START_MENU_EXPECTED)
+    out = []
+    for item in drift.get("extra", []):
+        out.append({
+            "code": "UI_NEW_ELEMENT",
+            "severity": "LOW",
+            "message": f"Обнаружен новый элемент стартового меню: «{item}».",
+        })
+    for item in drift.get("missing", []):
+        out.append({
+            "code": "UI_MISSING_ELEMENT",
+            "severity": "LOW",
+            "message": f"В каталоге ожидается пункт меню «{item}», но он не найден.",
+        })
+    return out
 
 
 # ===========================================================================
@@ -108,10 +164,16 @@ def main():
             runner, step_num=1,
             step_name="Проверка: главное окно — «Главная» видна",
             expected="Отображается вкладка меню «Главная»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s1_path)
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=ok,
                 pass_msg="Главное окно редактора открыто, отображается стартовый экран",
@@ -121,7 +183,7 @@ def main():
         # ==============================================================
         # Шаг 2: Клик «Шаблоны» → проверка что раздел открыт
         # ==============================================================
-        click_menu(pid, "templates")
+        menu_trace = click_menu(pid, "templates")
 
         s2_path = capture_step(runner.run_dir, 2, "templates",
                                activate_driver=driver, pid=pid)
@@ -135,10 +197,17 @@ def main():
             runner, step_num=2,
             step_name="Проверка: раздел «Шаблоны» открыт",
             expected="Отображается меню «Шаблоны»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s2_path)
+            _attach_action_trace(step, menu_trace, "click_menu")
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=ok,
                 pass_msg="Раздел «Шаблоны» открыт и отображается корректно",
@@ -148,7 +217,7 @@ def main():
         # ==============================================================
         # Шаг 3: Клик «Локальные файлы» → проверка что раздел открыт
         # ==============================================================
-        click_menu(pid, "local")
+        menu_trace = click_menu(pid, "local")
 
         s3_path = capture_step(runner.run_dir, 3, "local",
                                activate_driver=driver, pid=pid)
@@ -162,10 +231,17 @@ def main():
             runner, step_num=3,
             step_name="Проверка: раздел «Локальные файлы» открыт",
             expected="Отображается меню «Локальные файлы»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s3_path)
+            _attach_action_trace(step, menu_trace, "click_menu")
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=ok,
                 pass_msg="Раздел «Локальные файлы» открыт и отображается корректно",
@@ -175,7 +251,7 @@ def main():
         # ==============================================================
         # Шаг 4: Клик «Совместная работа» → проверка модального окна
         # ==============================================================
-        click_menu(pid, "collab")
+        menu_trace = click_menu(pid, "collab")
 
         s4_path = capture_step(runner.run_dir, 4, "collab_popup",
                                activate_driver=driver, pid=pid)
@@ -190,10 +266,17 @@ def main():
             runner, step_num=4,
             step_name="Проверка: окно подключения появилось",
             expected="Появляется окно «Выберите диск для подключения»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s4_path)
+            _attach_action_trace(step, menu_trace, "click_menu")
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=popup_ok,
                 pass_msg="Модальное окно подключения диска появилось",
@@ -216,7 +299,7 @@ def main():
             runner, step_num=5,
             step_name="Проверка: окно подключения закрыто",
             expected="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s5_path)
@@ -229,7 +312,7 @@ def main():
         # ==============================================================
         # Шаг 6: Клик «Настройки» → проверка что раздел открыт
         # ==============================================================
-        click_menu(pid, "settings")
+        menu_trace = click_menu(pid, "settings")
 
         s6_path = capture_step(runner.run_dir, 6, "settings",
                                activate_driver=driver, pid=pid)
@@ -243,10 +326,17 @@ def main():
             runner, step_num=6,
             step_name="Проверка: раздел «Настройки» открыт",
             expected="Отображается вкладка меню «Настройки»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s6_path)
+            _attach_action_trace(step, menu_trace, "click_menu")
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=ok,
                 pass_msg="Раздел «Настройки» открыт и отображается корректно",
@@ -256,7 +346,7 @@ def main():
         # ==============================================================
         # Шаг 7: Клик «О программе» → проверка что раздел открыт
         # ==============================================================
-        click_menu(pid, "about")
+        menu_trace = click_menu(pid, "about")
 
         s7_path = capture_step(runner.run_dir, 7, "about",
                                activate_driver=driver, pid=pid)
@@ -271,10 +361,17 @@ def main():
             runner, step_num=7,
             step_name="Проверка: раздел «О программе» открыт",
             expected="Отображается меню «О программе»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s7_path)
+            _attach_action_trace(step, menu_trace, "click_menu")
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=ok,
                 pass_msg="Раздел «О программе» открыт и отображается корректно",
@@ -284,7 +381,7 @@ def main():
         # ==============================================================
         # Шаг 8: Клик «Главная» → проверка возврата на стартовый экран
         # ==============================================================
-        click_menu(pid, "home")
+        menu_trace = click_menu(pid, "home")
 
         s8_path = capture_step(runner.run_dir, 8, "home_return",
                                activate_driver=driver, pid=pid)
@@ -299,10 +396,17 @@ def main():
             runner, step_num=8,
             step_name="Проверка: возврат на «Главная»",
             expected="Отображается вкладка меню «Главная»",
-            severity="MEDIUM",
+            severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s8_path)
+            _attach_action_trace(step, menu_trace, "click_menu")
+            for w in _menu_drift_warnings():
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
                 condition=ok,
                 pass_msg="Возврат на «Главная» выполнен, стартовый экран отображается",

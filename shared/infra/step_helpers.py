@@ -100,6 +100,9 @@ class StepVerifier:
         self._actual_fail = ""
         self._screenshot = ""
         self._timer = DurationTimer()
+        self._warnings = []
+        self._fallback_source = None
+        self._fallback_reason = None
 
     # --- context manager --------------------------------------------------
 
@@ -140,6 +143,19 @@ class StepVerifier:
         """Прикрепить скриншот к шагу."""
         self._screenshot = path
 
+    def add_warning(self, code: str, message: str, severity: str = "LOW"):
+        """Добавить предупреждение шага без перевода шага в FAIL."""
+        self._warnings.append({
+            "code": code,
+            "severity": severity,
+            "message": message,
+        })
+
+    def set_fallback(self, source: str, reason: str):
+        """Зафиксировать факт использования fallback-пути."""
+        self._fallback_source = source
+        self._fallback_reason = reason
+
     # --- internal ---------------------------------------------------------
 
     def _record_fail(self, detail: str):
@@ -151,9 +167,12 @@ class StepVerifier:
             actual=detail,
             screenshot=self._screenshot,
             duration_ms=self._timer.elapsed_ms(),
-            failure_severity=self._severity,
-            failure_area=self._failure_area,
-            failure_detail=detail,
+                failure_severity=self._severity,
+                failure_area=self._failure_area,
+                failure_detail=detail,
+                warnings=self._warnings,
+                fallback_source=self._fallback_source,
+                fallback_reason=self._fallback_reason,
         )
 
     def _record_pass(self):
@@ -165,4 +184,7 @@ class StepVerifier:
             actual=self._actual_pass,
             screenshot=self._screenshot,
             duration_ms=self._timer.elapsed_ms(),
+            warnings=self._warnings,
+            fallback_source=self._fallback_source,
+            fallback_reason=self._fallback_reason,
         )

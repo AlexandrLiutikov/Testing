@@ -556,10 +556,14 @@ Write-Output "FALLBACK"
         time.sleep(1)
 
     @staticmethod
-    def launch_editor(editor_path: str) -> None:
-        # Для устойчивой автоматизации CEF-UI включаем debug-интерфейс.
-        # Это открывает локальный CDP-порт, который используют semantic actions.
-        subprocess.Popen([editor_path, "--ascdesktop-support-debug-info"])
+    def launch_editor(editor_path: str, enable_debug: bool = True) -> None:
+        """Запустить редактор с опциональным debug-флагом."""
+        if enable_debug:
+            # Для устойчивой автоматизации CEF-UI включаем debug-интерфейс.
+            # Это открывает локальный CDP-порт, который используют semantic actions.
+            subprocess.Popen([editor_path, "--ascdesktop-support-debug-info"])
+            return
+        subprocess.Popen([editor_path])
 
     # ---------------------------------------------------------------
     # Keyboard / clipboard helpers

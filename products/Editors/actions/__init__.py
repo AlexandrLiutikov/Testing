@@ -1,0 +1,43 @@
+"""Actions для продукта Editors."""
+
+from products.Editors.actions.editor_actions import (
+    calibrate_toolbar_tabs,
+    click_menu,
+    click_toolbar_tab,
+    close_active_document_tab,
+    confirm_active_dialog,
+    consume_action_trace,
+    create_document,
+    detect_warning_window,
+    dismiss_collab_popup,
+    dismiss_warning,
+    kill_editors,
+    launch_editor,
+    list_start_menu_items_dom,
+    list_toolbar_tabs_dom,
+    redo_last_action,
+    save_active_document,
+    type_document_text,
+    undo_last_action,
+)
+
+__all__ = [
+    "calibrate_toolbar_tabs",
+    "click_menu",
+    "click_toolbar_tab",
+    "close_active_document_tab",
+    "confirm_active_dialog",
+    "consume_action_trace",
+    "create_document",
+    "detect_warning_window",
+    "dismiss_collab_popup",
+    "dismiss_warning",
+    "kill_editors",
+    "launch_editor",
+    "list_start_menu_items_dom",
+    "list_toolbar_tabs_dom",
+    "redo_last_action",
+    "save_active_document",
+    "type_document_text",
+    "undo_last_action",
+]

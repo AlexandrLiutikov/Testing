@@ -134,6 +134,11 @@ class BaseDriver(ABC):
         raise NotImplementedError
 
     @staticmethod
-    def launch_editor(editor_path: str) -> None:
-        """Запустить редактор по указанному пути."""
+    def launch_editor(editor_path: str, enable_debug: bool = True) -> None:
+        """Запустить редактор по указанному пути.
+
+        Args:
+            editor_path: путь к редактору.
+            enable_debug: запускать ли с debug-флагом (если поддерживается).
+        """
         raise NotImplementedError

@@ -37,6 +37,32 @@ CASE_META = {
 }
 
 
+def _attach_action_trace(step, trace: dict, action_name: str):
+    if not trace:
+        return
+
+    if trace.get("fallback_used"):
+        step.set_fallback(
+            trace.get("fallback_source", ""),
+            trace.get("fallback_reason", ""),
+        )
+
+    mode = str(trace.get("mode", "")).strip()
+    if mode and mode not in ("DOM_CDP", "DOM_FOCUS"):
+        step.add_warning(
+            code=f"{action_name.upper()}_MODE",
+            severity="LOW",
+            message=f"Action выполнился в режиме {mode}, а не в DOM primary.",
+        )
+
+    for w in trace.get("warnings", []) or []:
+        step.add_warning(
+            code=w.get("code", "ACTION_WARNING"),
+            severity=w.get("severity", "LOW"),
+            message=w.get("message", ""),
+        )
+
+
 TEXT_TO_TYPE = (
     "Задача организации, в особенности же сложившаяся структура организации позволяет "
     "выполнять важные задания по разработке новых предложений. Товарищи! рамки и место "
@@ -85,8 +111,9 @@ def main():
 
         driver.activate_window(pid)
 
+        input_trace = {}
         try:
-            type_document_text(pid, TEXT_TO_TYPE, align_left=False)
+            input_trace = type_document_text(pid, TEXT_TO_TYPE, align_left=False)
         except NotImplementedError as exc:
             shot = capture_step(
                 runner.run_dir,
@@ -143,6 +170,7 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot)
+            _attach_action_trace(step, input_trace, "type_document_text")
             step.check(
                 condition=ok,
                 pass_msg="Текст введён в документ и расположен у левого поля страницы",

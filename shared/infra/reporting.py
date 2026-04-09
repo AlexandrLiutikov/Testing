@@ -3,17 +3,39 @@
 import csv
 import os
 from datetime import datetime
-from typing import Dict, List
+
+
+def _warnings_text(step: dict) -> str:
+    warnings = step.get("warnings", []) or []
+    fallback_source = step.get("fallback_source")
+    fallback_reason = step.get("fallback_reason")
+    chunks = []
+
+    for item in warnings:
+        sev = str(item.get("severity", "LOW")).upper()
+        msg = str(item.get("message", "")).strip()
+        if msg:
+            chunks.append(f"[{sev}] {msg}")
+
+    if fallback_source:
+        fb = f"FALLBACK: {fallback_source}"
+        if fallback_reason:
+            fb += f" ({fallback_reason})"
+        chunks.append(fb)
+
+    return " | ".join(chunks)
 
 
 def _steps_html_rows(steps: list) -> str:
     rows = []
     for s in steps:
-        cls = "pass" if s["status"] == "PASS" else "fail"
+        cls_map = {"PASS": "pass", "FAIL": "fail", "BLOCKED": "blocked"}
+        cls = cls_map.get(s["status"], "fail")
         sev_cell = ""
-        if s["status"] == "FAIL":
+        if s["status"] in ("FAIL", "BLOCKED"):
             sev = s.get("failure_severity", "")
-            sev_cell = f"<span class='severity {sev.lower()}'>{sev}</span>"
+            if sev:
+                sev_cell = f"<span class='severity {sev.lower()}'>{sev}</span>"
         screenshot_cell = ""
         if s.get("screenshot"):
             fname = os.path.basename(s["screenshot"])
@@ -23,12 +45,14 @@ def _steps_html_rows(steps: list) -> str:
                 f"class='screenshot-thumb'>"
                 f"</a>"
             )
+        wf_cell = _warnings_text(s)
         rows.append(
             f"      <tr>\n"
             f"        <td>{s['step']}</td>\n"
             f"        <td>{s['step_name']}</td>\n"
             f"        <td class='{cls}'>{s['status']}</td>\n"
             f"        <td>{sev_cell}</td>\n"
+            f"        <td>{wf_cell}</td>\n"
             f"        <td>{s['expected']}</td>\n"
             f"        <td>{s['actual']}</td>\n"
             f"        <td>{screenshot_cell}</td>\n"
@@ -51,7 +75,18 @@ def _decision_html(decision: dict) -> str:
     recs_li = "\n".join(
         f"      <li>{r}</li>" for r in decision.get("recommendations", [])
     )
+    infra_li = "\n".join(
+        f"      <li>{r}</li>" for r in decision.get("infra_issues", [])
+    )
+    blocked_li = "\n".join(
+        f"      <li>{r}</li>" for r in decision.get("blocked_cases", [])
+    )
+    warns_li = "\n".join(
+        f"      <li>{r}</li>" for r in decision.get("warnings", [])
+    )
     stats = decision.get("stats", {})
+    run_conf = decision.get("run_confidence", "н/д")
+    run_conf_detail = decision.get("run_confidence_detail", "")
 
     return f"""  <div class='decision {css_cls}'>
     <div class='decision-badge {css_cls}'>RELEASE DECISION: {verdict}</div>
@@ -73,8 +108,27 @@ def _decision_html(decision: dict) -> str:
 {recs_li}
       </ul>
     </div>
+    <div class='decision-section'>
+      <strong>INFRA issues:</strong>
+      <ul>
+{infra_li}
+      </ul>
+    </div>
+    <div class='decision-section'>
+      <strong>BLOCKED cases:</strong>
+      <ul>
+{blocked_li}
+      </ul>
+    </div>
+    <div class='decision-section'>
+      <strong>Warnings:</strong>
+      <ul>
+{warns_li}
+      </ul>
+    </div>
     <div class='decision-stats'>
-      Всего шагов: {stats.get('total', 0)} | PASS: {stats.get('passed', 0)} | FAIL: {stats.get('failed', 0)} | Критические пути: {stats.get('critical_path_coverage', 'н/д')}
+      Всего шагов: {stats.get('total', 0)} | PASS: {stats.get('passed', 0)} | TEST_FAIL: {stats.get('test_failed', 0)} | INFRA_FAIL: {stats.get('infra_failed', 0)} | BLOCKED: {stats.get('blocked', 0)} | WARN: {stats.get('warnings_total', 0)} | Критические пути: {stats.get('critical_path_coverage', 'н/д')}
+      <br>Run confidence: {run_conf} {run_conf_detail}
     </div>
   </div>"""
 
@@ -90,6 +144,9 @@ def generate_html(
 ) -> str:
     passed = sum(1 for s in steps if s["status"] == "PASS")
     failed = sum(1 for s in steps if s["status"] == "FAIL")
+    blocked = sum(1 for s in steps if s["status"] == "BLOCKED")
+    warnings_total = sum(len(s.get("warnings", [])) for s in steps)
+    fallback_steps = sum(1 for s in steps if s.get("fallback_source"))
     overall = "PASS" if failed == 0 else "FAIL"
     badge_cls = "pass" if overall == "PASS" else "fail"
 
@@ -113,7 +170,7 @@ def generate_html(
       Разрешение: {env.get('screen_resolution', 'н/д')} | Масштаб: {env.get('display_scale', 'н/д')} | Версия: {env.get('editor_version', 'н/д')} | Стенд: {env.get('hostname', 'н/д')}
     </div>
     <div>Результат: <span class='badge {badge_cls}'>{overall}</span></div>
-    <div>PASS: {passed} | FAIL: {failed}</div>
+    <div>PASS: {passed} | FAIL: {failed} | BLOCKED: {blocked} | WARN: {warnings_total} | FALLBACK_STEPS: {fallback_steps}</div>
   </div>
 
 {_decision_html(decision)}
@@ -125,6 +182,7 @@ def generate_html(
         <th>Шаг</th>
         <th>Статус</th>
         <th>Severity</th>
+        <th>Warnings/Fallback</th>
         <th>Ожидание</th>
         <th>Факт</th>
         <th>Скриншот</th>
@@ -165,18 +223,34 @@ def generate_md(
     lines.append(f"**{decision['verdict']}**\n")
     for r in decision.get("reasons", []):
         lines.append(f"- {r}")
+    if decision.get("infra_issues"):
+        lines.append("\n### INFRA issues")
+        for item in decision.get("infra_issues", []):
+            lines.append(f"- {item}")
+    if decision.get("blocked_cases"):
+        lines.append("\n### BLOCKED cases")
+        for item in decision.get("blocked_cases", []):
+            lines.append(f"- {item}")
+    if decision.get("warnings"):
+        lines.append("\n### Warnings")
+        for item in decision.get("warnings", []):
+            lines.append(f"- {item}")
+    lines.append(f"\n- Run confidence: {decision.get('run_confidence', 'н/д')}")
+    if decision.get("run_confidence_detail"):
+        lines.append(f"- Детали confidence: {decision.get('run_confidence_detail')}")
     lines.append("")
 
     lines.append("## Результаты шагов\n")
     lines.append(
-        "| Step | Шаг | Статус | Severity | Ожидание | Факт | Скриншот |"
+        "| Step | Шаг | Статус | Severity | Warnings/Fallback | Ожидание | Факт | Скриншот |"
     )
-    lines.append("|------|-----|--------|----------|----------|------|----------|")
+    lines.append("|------|-----|--------|----------|-------------------|----------|------|----------|")
     for s in steps:
-        sev = s.get("failure_severity", "") if s["status"] == "FAIL" else ""
+        sev = s.get("failure_severity", "") if s["status"] in ("FAIL", "BLOCKED") else ""
+        wf = _warnings_text(s)
         scr = os.path.basename(s["screenshot"]) if s.get("screenshot") else ""
         lines.append(
-            f"| {s['step']} | {s['step_name']} | {s['status']} | {sev} "
+            f"| {s['step']} | {s['step_name']} | {s['status']} | {sev} | {wf} "
             f"| {s['expected']} | {s['actual']} | {scr} |"
         )
     lines.append("")
@@ -185,7 +259,18 @@ def generate_md(
 
 def write_csv(csv_path: str, steps: list):
     csv_fields = [
-        "step", "step_name", "status", "expected", "actual", "screenshot",
+        "step",
+        "step_name",
+        "status",
+        "failure_type",
+        "failure_severity",
+        "failure_area",
+        "fallback_source",
+        "fallback_reason",
+        "warnings",
+        "expected",
+        "actual",
+        "screenshot",
     ]
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")

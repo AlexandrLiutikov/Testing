@@ -37,5 +37,5 @@ class LinuxDriver(BaseDriver):
         raise NotImplementedError("LinuxDriver.kill_editors — ещё не реализован")
 
     @staticmethod
-    def launch_editor(editor_path: str) -> None:
+    def launch_editor(editor_path: str, enable_debug: bool = True) -> None:
         raise NotImplementedError("LinuxDriver.launch_editor — ещё не реализован")
