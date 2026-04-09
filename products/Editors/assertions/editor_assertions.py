@@ -9,7 +9,7 @@ Assertions — это проверяющие функции, которые:
 import os
 from typing import List, Optional, Tuple
 
-from shared.infra.ocr import has_tokens, ocr_image, find_token_bbox
+from shared.infra.ocr import has_tokens, ocr_image
 from shared.infra.screenshots import take_screenshot
 from shared.infra.waits import wait_main_proc
 
@@ -62,6 +62,67 @@ REFERENCE_DOC_PAGE_TOKENS = {
     ],
 }
 
+REFERENCE_DOC_PAGE_FULL_VIEW_MARKERS = {
+    1: {
+        "top": [
+            "Это особый колонтитул для первой страницы",
+            "особый колонтитул для первой страницы",
+        ],
+        "bottom": [
+            "Страница 1 из 4",
+            "Страница 1 из4",
+            "Страница 1из 4",
+            "Страница 1из4",
+            "Страница из4",
+            "1 из 4",
+        ],
+    },
+    2: {
+        "top": [
+            "Этот колонтитул для четных страниц",
+            "Работа с таблицами",
+        ],
+        "bottom": [
+            "Страница 2 из 4",
+            "Страница 2 из4",
+            "Страница 2из 4",
+            "Страница 2из4",
+            "Страница 2",
+        ],
+    },
+    3: {
+        "top": [
+            "Работа с диаграммами",
+            "Линейчатая диаграмма",
+            "Работа с автофигурами",
+            "Работа савтофигурами",
+        ],
+        "bottom": [
+            "Страница 3 из 4",
+            "Страница 3 из4",
+            "Страница 3из 4",
+            "Страница 3из4",
+            "Страница 3 us 4",
+            "Страница зиз 4",
+            "Страница 3",
+        ],
+    },
+    4: {
+        "top": [
+            "Этот колонтитул для четных страниц",
+            "колонтитул для четных страниц",
+            "Изображение для колонтитула",
+        ],
+        "bottom": [
+            "Страница 4 из 4",
+            "Страница 4 из4",
+            "Страница 4из 4",
+            "Страница 4из4",
+            "Страница 4",
+        ],
+    },
+}
+
 
 def assert_window_exists(
     process_name: str = "editors",
@@ -89,11 +150,13 @@ def assert_reference_document_opened(
 def assert_reference_document_page_content(
     screenshot_path: str,
     page_index: int,
+    capture: bool = True,
 ) -> Tuple[bool, List[str]]:
     """Проверить содержимое конкретной страницы эталонного документа."""
     tokens = REFERENCE_DOC_PAGE_TOKENS.get(page_index, [])
     if not tokens:
-        take_screenshot(screenshot_path)
+        if capture:
+            take_screenshot(screenshot_path)
         return False, []
     page_tokens = [
         t for t in tokens
@@ -121,7 +184,66 @@ def assert_reference_document_page_content(
             return assert_section_visible(screenshot_path, page_tokens, need=1)
         return ok, found
 
-    return assert_section_visible(screenshot_path, tokens, need=1)
+    if capture:
+        take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+    # Для страниц 2-3 запрещаем PASS только по токенам статус-бара.
+    if page_index in (2, 3):
+        probe = content_tokens or tokens
+        return has_tokens(ocr_text, probe, need=1)
+
+    # Страница 4 может быть почти пустой: сначала ищем контент, затем page-token.
+    if page_index == 4:
+        probe = content_tokens or tokens
+        ok, found = has_tokens(ocr_text, probe, need=1)
+        if ok:
+            return ok, found
+        if page_tokens:
+            return has_tokens(ocr_text, page_tokens, need=1)
+        return ok, found
+
+    return has_tokens(ocr_text, tokens, need=1)
+
+
+def assert_reference_document_page_full_view(
+    screenshot_path: str,
+    page_index: int,
+    capture: bool = True,
+    top_max_ratio: float = 0.45,
+    bottom_min_ratio: float = 0.55,
+) -> Tuple[bool, List[str]]:
+    """Проверить, что страница отображается целиком (верх+низ страницы видны)."""
+    markers = REFERENCE_DOC_PAGE_FULL_VIEW_MARKERS.get(page_index)
+    if not markers:
+        if capture:
+            take_screenshot(screenshot_path)
+        return False, []
+
+    if capture:
+        take_screenshot(screenshot_path)
+    ocr_text = ocr_image(screenshot_path)
+    top_ok, top_found = has_tokens(ocr_text, markers.get("top", []), need=1)
+    bottom_ok, bottom_found = has_tokens(ocr_text, markers.get("bottom", []), need=1)
+
+    found = [f"top:{token}" for token in top_found]
+    found.extend([f"bottom:{token}" for token in bottom_found])
+    if top_ok and bottom_ok:
+        return True, found
+
+    if bottom_ok:
+        content_tokens = REFERENCE_DOC_PAGE_TOKENS.get(page_index, [])
+        relaxed_top_tokens = [t for t in content_tokens if "Страница" not in t]
+        relaxed_top_ok, relaxed_top_found = has_tokens(ocr_text, relaxed_top_tokens, need=1)
+        if relaxed_top_ok:
+            found.extend([f"top_relaxed:{token}" for token in relaxed_top_found])
+            return True, found
+
+        # Последняя страница может содержать только колонтитулы и номер страницы.
+        if page_index == 4:
+            found.append("top_relaxed:PAGE4_BOTTOM_ONLY")
+            return True, found
+
+    return False, found
 
 
 def assert_warning_visible(

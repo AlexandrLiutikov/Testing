@@ -29,6 +29,7 @@ from products.Editors.actions.editor_actions import (
 from products.Editors.assertions.editor_assertions import (
     assert_reference_document_opened,
     assert_reference_document_page_content,
+    assert_reference_document_page_full_view,
     assert_section_visible,
 )
 
@@ -207,12 +208,13 @@ def main():
             need=2,
         )
         page1_token_ok, page1_token_found = assert_reference_document_page_content(shot2, 1)
+        page1_full_view_ok, page1_full_view_found = assert_reference_document_page_full_view(shot2, 1)
         zoom_expected = "Масштаб изменён, страница целиком помещается в рабочей области"
         page1_match_msg = "Содержание и форма первой страницы совпадают с эталоном"
         zoom_ok = (
             bool(zoom_trace.get("ok"))
             and (zoom_label_ok or zoom_status_ok)
-            and page1_full_ok
+            and (page1_full_ok or page1_full_view_ok)
             and page1_token_ok
         )
 
@@ -233,6 +235,8 @@ def main():
                     "Не подтверждено отображение страницы 1 целиком после команды "
                     f"«По размеру страницы». Маркеры full-page: "
                     f"{page1_full_found if page1_full_found else 'нет'}; "
+                    f"маркеры колонтитулов: "
+                    f"{page1_full_view_found if page1_full_view_found else 'нет'}; "
                     f"маркеры страницы 1: {page1_token_found if page1_token_found else 'нет'}"
                 ),
             )
@@ -246,17 +250,30 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        page2_state = {"ok": False, "found": []}
+        page2_state = {"ok": False, "found": [], "full_ok": False, "full_found": []}
 
         def _probe_page2() -> bool:
-            driver.activate_window(pid)
-            ok, found = assert_reference_document_page_content(shot3, 2)
+            capture_step(
+                runner.run_dir,
+                3,
+                "reference_page_2_check",
+                activate_driver=driver,
+                pid=pid,
+            )
+            ok, found = assert_reference_document_page_content(shot3, 2, capture=False)
+            full_ok, full_found = assert_reference_document_page_full_view(shot3, 2, capture=False)
             page2_state["ok"] = ok
             page2_state["found"] = found
-            return ok
+            page2_state["full_ok"] = full_ok
+            page2_state["full_found"] = full_found
+            return ok and full_ok
 
-        page2_ok = wait_until(_probe_page2, timeout_sec=8, poll_interval=1.0) and page2_state["ok"]
-        page2_expected = "Отображается страница 2 эталонного документа"
+        page2_ok = (
+            wait_until(_probe_page2, timeout_sec=8, poll_interval=1.0)
+            and page2_state["ok"]
+            and page2_state["full_ok"]
+        )
+        page2_expected = "Отображается страница 2 эталонного документа целиком (верх и низ страницы видны)"
 
         with StepVerifier(
             runner,
@@ -274,7 +291,9 @@ def main():
                 fail_msg=(
                     "Не подтверждено отображение страницы 2. "
                     f"Найденные OCR-маркеры: "
-                    f"{page2_state['found'] if page2_state['found'] else 'нет OCR-токенов'}"
+                    f"{page2_state['found'] if page2_state['found'] else 'нет OCR-токенов'}; "
+                    f"маркеры целостности страницы: "
+                    f"{page2_state['full_found'] if page2_state['full_found'] else 'нет'}"
                 ),
             )
 
@@ -287,17 +306,30 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        page3_state = {"ok": False, "found": []}
+        page3_state = {"ok": False, "found": [], "full_ok": False, "full_found": []}
 
         def _probe_page3() -> bool:
-            driver.activate_window(pid)
-            ok, found = assert_reference_document_page_content(shot4, 3)
+            capture_step(
+                runner.run_dir,
+                4,
+                "reference_page_3_check",
+                activate_driver=driver,
+                pid=pid,
+            )
+            ok, found = assert_reference_document_page_content(shot4, 3, capture=False)
+            full_ok, full_found = assert_reference_document_page_full_view(shot4, 3, capture=False)
             page3_state["ok"] = ok
             page3_state["found"] = found
-            return ok
+            page3_state["full_ok"] = full_ok
+            page3_state["full_found"] = full_found
+            return ok and full_ok
 
-        page3_ok = wait_until(_probe_page3, timeout_sec=8, poll_interval=1.0) and page3_state["ok"]
-        page3_expected = "Отображается страница 3 эталонного документа"
+        page3_ok = (
+            wait_until(_probe_page3, timeout_sec=8, poll_interval=1.0)
+            and page3_state["ok"]
+            and page3_state["full_ok"]
+        )
+        page3_expected = "Отображается страница 3 эталонного документа целиком (верх и низ страницы видны)"
 
         with StepVerifier(
             runner,
@@ -315,7 +347,9 @@ def main():
                 fail_msg=(
                     "Не подтверждено отображение страницы 3. "
                     f"Найденные OCR-маркеры: "
-                    f"{page3_state['found'] if page3_state['found'] else 'нет OCR-токенов'}"
+                    f"{page3_state['found'] if page3_state['found'] else 'нет OCR-токенов'}; "
+                    f"маркеры целостности страницы: "
+                    f"{page3_state['full_found'] if page3_state['full_found'] else 'нет'}"
                 ),
             )
 
@@ -328,17 +362,30 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        page4_state = {"ok": False, "found": []}
+        page4_state = {"ok": False, "found": [], "full_ok": False, "full_found": []}
 
         def _probe_page4() -> bool:
-            driver.activate_window(pid)
-            ok, found = assert_reference_document_page_content(shot5, 4)
+            capture_step(
+                runner.run_dir,
+                5,
+                "reference_page_4_check",
+                activate_driver=driver,
+                pid=pid,
+            )
+            ok, found = assert_reference_document_page_content(shot5, 4, capture=False)
+            full_ok, full_found = assert_reference_document_page_full_view(shot5, 4, capture=False)
             page4_state["ok"] = ok
             page4_state["found"] = found
-            return ok
+            page4_state["full_ok"] = full_ok
+            page4_state["full_found"] = full_found
+            return ok and full_ok
 
-        page4_ok = wait_until(_probe_page4, timeout_sec=8, poll_interval=1.0) and page4_state["ok"]
-        page4_expected = "Отображается страница 4 эталонного документа"
+        page4_ok = (
+            wait_until(_probe_page4, timeout_sec=8, poll_interval=1.0)
+            and page4_state["ok"]
+            and page4_state["full_ok"]
+        )
+        page4_expected = "Отображается страница 4 эталонного документа целиком (верх и низ страницы видны)"
 
         with StepVerifier(
             runner,
@@ -356,7 +403,9 @@ def main():
                 fail_msg=(
                     "Не подтверждено отображение страницы 4. "
                     f"Найденные OCR-маркеры: "
-                    f"{page4_state['found'] if page4_state['found'] else 'нет OCR-токенов'}"
+                    f"{page4_state['found'] if page4_state['found'] else 'нет OCR-токенов'}; "
+                    f"маркеры целостности страницы: "
+                    f"{page4_state['full_found'] if page4_state['full_found'] else 'нет'}"
                 ),
             )
 

@@ -16,6 +16,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from typing import Optional
 
 from shared.drivers import get_driver
 from shared.infra.screenshots import take_screenshot
@@ -845,7 +846,7 @@ def go_to_next_page(pid: int) -> dict:
             return _trace("go_to_next_page", True, "MOUSE_WHEEL")
 
     scroll_trace = _cdp_scroll_next_page_via_vertical_scroll()
-    if scroll_trace.get("ok"):
+    if scroll_trace.get("ok") and scroll_trace.get("page_moved") is True:
         return _trace(
             "go_to_next_page",
             True,
@@ -854,7 +855,7 @@ def go_to_next_page(pid: int) -> dict:
             fallback_source="MOUSE_WHEEL_UNAVAILABLE",
             fallback_reason=(
                 "Прокрутка колесом не подтвердила переход на следующую страницу; "
-                "использован DOM-скролл."
+                "использован DOM-скролл с подтверждением page_moved=True."
             ),
             warnings=[{
                 "code": "NEXT_PAGE_DOM_FALLBACK",
@@ -863,22 +864,64 @@ def go_to_next_page(pid: int) -> dict:
             }],
         )
 
+    before_page = _cdp_read_current_page()
+
     try:
-        driver.page_down(pid)
+        for _ in range(2):
+            driver.page_down(pid)
+            time.sleep(0.25)
+            after_page = _cdp_read_current_page()
+            if (
+                isinstance(before_page, int)
+                and isinstance(after_page, int)
+                and after_page > before_page
+            ):
+                return _trace(
+                    "go_to_next_page",
+                    True,
+                    "KEYBOARD",
+                    fallback_used=True,
+                    fallback_source="DOM_VERTICAL_SCROLL_UNAVAILABLE",
+                    fallback_reason=(
+                        "Скролл через id_vertical_scroll не подтвердил page_moved=True; "
+                        "использован верифицированный fallback PageDown."
+                    ),
+                    warnings=[{
+                        "code": "NEXT_PAGE_KEYBOARD_FALLBACK",
+                        "severity": "LOW",
+                        "message": (
+                            "Переход на следующую страницу выполнен через PageDown "
+                            "с подтверждением изменения индекса страницы."
+                        ),
+                    }],
+                )
+            if isinstance(after_page, int):
+                before_page = after_page
+
         return _trace(
             "go_to_next_page",
-            True,
-            "KEYBOARD",
+            False,
+            "FAILED",
             fallback_used=True,
-            fallback_source="MOUSE_AND_DOM_SCROLL_UNAVAILABLE",
+            fallback_source="NEXT_PAGE_UNVERIFIED",
             fallback_reason=(
-                "Недоступны прокрутка колесом и DOM-скролл; "
-                f"использован fallback PageDown. {last_wheel_error}".strip()
+                "Не подтверждён переход страницы: прокрутка колесом и DOM-скролл "
+                "не дали верифицированного перехода, а fallback PageDown не удалось "
+                "подтвердить по индексу страницы."
+                + (f" Детали wheel: {last_wheel_error}" if last_wheel_error else "")
+                + (
+                    f" Детали DOM: {scroll_trace.get('reason')}"
+                    if scroll_trace.get("reason")
+                    else ""
+                )
             ),
             warnings=[{
-                "code": "NEXT_PAGE_KEYBOARD_FALLBACK",
+                "code": "NEXT_PAGE_REQUIRES_OCR_CONFIRMATION",
                 "severity": "LOW",
-                "message": "Переход на следующую страницу выполнен через PageDown fallback.",
+                "message": (
+                    "Индекс страницы не считан через DOM API; "
+                    "переход должен подтверждаться OCR/контент-проверкой шага."
+                ),
             }],
         )
     except Exception as exc:
@@ -1365,23 +1408,102 @@ def _build_scroll_next_page_script(doc_ref: str) -> str:
 
 def _cdp_scroll_next_page_via_vertical_scroll() -> dict:
     """Перейти на следующую страницу через вертикальный скролл редактора."""
+    last_result = {}
+
     frame_result = _cdp_eval_in_editor_frame(_build_scroll_next_page_script("doc"))
-    if isinstance(frame_result, dict) and frame_result.get("ok"):
-        return {
-            "ok": True,
-            "mode": str(frame_result.get("mode") or "DOM_VERTICAL_SCROLL"),
-            "source": "editor_frame",
-        }
+    if isinstance(frame_result, dict):
+        last_result = frame_result
+        if frame_result.get("ok"):
+            return {
+                "ok": True,
+                "mode": str(frame_result.get("mode") or "DOM_VERTICAL_SCROLL"),
+                "source": "editor_frame",
+                "reason": str(frame_result.get("reason") or ""),
+                "before_page": frame_result.get("before_page"),
+                "after_page": frame_result.get("after_page"),
+                "page_moved": frame_result.get("page_moved"),
+            }
 
     root_result = _cdp_eval_root(_build_scroll_next_page_script("document"))
-    if isinstance(root_result, dict) and root_result.get("ok"):
-        return {
-            "ok": True,
-            "mode": str(root_result.get("mode") or "DOM_VERTICAL_SCROLL"),
-            "source": "root",
-        }
+    if isinstance(root_result, dict):
+        last_result = root_result
+        if root_result.get("ok"):
+            return {
+                "ok": True,
+                "mode": str(root_result.get("mode") or "DOM_VERTICAL_SCROLL"),
+                "source": "root",
+                "reason": str(root_result.get("reason") or ""),
+                "before_page": root_result.get("before_page"),
+                "after_page": root_result.get("after_page"),
+                "page_moved": root_result.get("page_moved"),
+            }
 
-    return {"ok": False}
+    return {
+        "ok": False,
+        "mode": str(last_result.get("mode") or ""),
+        "source": "none",
+        "reason": str(last_result.get("reason") or "vertical_scroll_not_available"),
+        "before_page": last_result.get("before_page"),
+        "after_page": last_result.get("after_page"),
+        "page_moved": last_result.get("page_moved"),
+    }
+
+
+def _build_read_current_page_script(doc_ref: str) -> str:
+    return f"""
+  const d = {doc_ref};
+  if (!d) return {{ok:false, reason:'no_document'}};
+  const w = (d.defaultView || window);
+
+  const getWordControl = () => {{
+    const candidates = [
+      w.Asc && w.Asc.editor && w.Asc.editor.WordControl,
+      w.AscCommon && w.AscCommon.g_oWordControl,
+      w.editor && w.editor.WordControl,
+      w.g_oWordControl,
+    ];
+    for (const c of candidates) {{
+      if (c) return c;
+    }}
+    return null;
+  }};
+
+  try {{
+    const ctrl = getWordControl();
+    if (!ctrl) return {{ok:false, reason:'no_word_control'}};
+    const docApi = ctrl.m_oDrawingDocument || ctrl.m_oLogicDocument || ctrl;
+    const probes = [
+      docApi && docApi.m_lCurrentPage,
+      docApi && docApi.m_nCurrentPage,
+      ctrl.m_lCurrentPage,
+      ctrl.m_nCurrentPage,
+    ];
+    for (const val of probes) {{
+      if (typeof val === 'number' && Number.isFinite(val)) {{
+        return {{ok:true, page: val}};
+      }}
+    }}
+    return {{ok:false, reason:'page_index_not_available'}};
+  }} catch (e) {{
+    return {{ok:false, reason:'read_current_page_error'}};
+  }}
+"""
+
+
+def _cdp_read_current_page() -> Optional[int]:
+    frame_result = _cdp_eval_in_editor_frame(_build_read_current_page_script("doc"))
+    if isinstance(frame_result, dict) and frame_result.get("ok"):
+        page = frame_result.get("page")
+        if isinstance(page, (int, float)):
+            return int(page)
+
+    root_result = _cdp_eval_root(_build_read_current_page_script("document"))
+    if isinstance(root_result, dict) and root_result.get("ok"):
+        page = root_result.get("page")
+        if isinstance(page, (int, float)):
+            return int(page)
+
+    return None
 
 
 def _cdp_read_current_page_index():
