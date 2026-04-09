@@ -55,7 +55,7 @@ def _attach_action_trace(step, trace: dict, action_name: str):
         )
 
     mode = str(trace.get("mode", "")).strip()
-    if mode and mode not in ("DOM_CDP", "LAUNCH_DEBUG", "KEYBOARD"):
+    if mode and mode not in ("DOM_CDP", "LAUNCH_DEBUG", "KEYBOARD", "MOUSE_WHEEL"):
         step.add_warning(
             code=f"{action_name.upper()}_MODE",
             severity="LOW",

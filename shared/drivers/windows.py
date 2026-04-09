@@ -406,6 +406,55 @@ Write-Output "NOTFOUND"
         self._tap_key(0x22)  # VK_NEXT / PageDown
         time.sleep(0.3)
 
+    def scroll_next_page(self, pid: int) -> None:
+        """Прокрутить документ колесом мыши (primary для ТК6)."""
+        import ctypes
+
+        self.activate_window(pid)
+        rect = self.get_window_rect(pid)
+        if not rect:
+            raise RuntimeError("Не удалось получить геометрию окна для mouse wheel")
+
+        left, top, right, bottom = rect
+        px = int(left + (right - left) * 0.42)
+        py = int(top + (bottom - top) * 0.52)
+
+        ctypes.windll.user32.SetCursorPos(px, py)
+        time.sleep(0.05)
+
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+        MOUSEEVENTF_WHEEL = 0x0800
+        WHEEL_DELTA = 120
+
+        # Фокусируем рабочую область документа, затем крутим колесо.
+        ctypes.windll.user32.mouse_event(
+            ctypes.c_ulong(MOUSEEVENTF_LEFTDOWN),
+            ctypes.c_ulong(0),
+            ctypes.c_ulong(0),
+            ctypes.c_ulong(0),
+            ctypes.c_size_t(0),
+        )
+        ctypes.windll.user32.mouse_event(
+            ctypes.c_ulong(MOUSEEVENTF_LEFTUP),
+            ctypes.c_ulong(0),
+            ctypes.c_ulong(0),
+            ctypes.c_ulong(0),
+            ctypes.c_size_t(0),
+        )
+        time.sleep(0.08)
+
+        # Отрицательный delta прокручивает страницу вниз (как колесо мыши).
+        # Меньший шаг снижает риск перескока через страницу в режиме fit-page.
+        ctypes.windll.user32.mouse_event(
+            ctypes.c_ulong(MOUSEEVENTF_WHEEL),
+            ctypes.c_ulong(0),
+            ctypes.c_ulong(0),
+            ctypes.c_ulong(ctypes.c_uint32(-2 * WHEEL_DELTA).value),
+            ctypes.c_size_t(0),
+        )
+        time.sleep(0.2)
+
     def click_current_tab_close_button(self, pid: int) -> bool:
         """Кликнуть по `X` активной вкладки через UIAutomation TabBar."""
         ps = f"""
