@@ -175,10 +175,11 @@ def generate_html(
 
 {_decision_html(decision)}
 
-  <table>
+  <div class='table-wrap'>
+  <table class='steps-table'>
     <thead>
       <tr>
-        <th>Step</th>
+        <th>ID</th>
         <th>Шаг</th>
         <th>Статус</th>
         <th>Severity</th>
@@ -192,6 +193,7 @@ def generate_html(
 {_steps_html_rows(steps)}
     </tbody>
   </table>
+  </div>
   <div class='footer'>
     JSON: results.json |
     CSV: results.csv |

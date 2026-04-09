@@ -253,6 +253,7 @@ def _generate_summary_html(
 
 {_decision_html(decision)}
 
+  <div class='table-wrap'>
   <table class='cases-table'>
     <thead>
       <tr>
@@ -269,6 +270,7 @@ def _generate_summary_html(
 {_case_rows_html(case_results)}
     </tbody>
   </table>
+  </div>
 
   <div class='footer'>
     JSON: results_all.json | CSV: results_all.csv
