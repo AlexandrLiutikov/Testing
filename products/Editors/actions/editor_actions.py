@@ -385,26 +385,6 @@ def _cdp_eval_in_editor_frame(expression_body: str):
         return None
 
 
-def _close_active_document_tab_via_cdp() -> bool:
-    """Закрыть документ через DOM-контрол внутри редактора (CDP-first)."""
-    result = _cdp_eval_in_editor_frame(
-        """
-  const btn = doc.querySelector('#btn-go-back');
-  if (!btn) return {ok:false, reason:"btn_go_back_not_found"};
-  const style = window.getComputedStyle(btn);
-  if (!style || style.display === "none" || style.visibility === "hidden") {
-    return {ok:false, reason:"btn_go_back_hidden"};
-  }
-  btn.click();
-  return {ok:true, source:"btn_go_back"};
-"""
-    )
-    ok = bool(isinstance(result, dict) and result.get("ok"))
-    if ok:
-        logger.info("CDP close-tab success via #btn-go-back")
-    return ok
-
-
 def _click_quick_access_button_via_cdp(button_key: str) -> bool:
     selectors = _QUICK_ACCESS_SELECTORS.get(button_key, [])
     for selector in selectors:
