@@ -20,7 +20,7 @@ STEP 1 — READ DOCUMENTATION (ОБЯЗАТЕЛЬНО)
 
 Прочитай и проанализируй:
 
-1. docs/governance/AGENTS.md
+1. AGENTS.md
 2. docs/governance/GIT_DISCIPLINE.md
 3. products/<Продукт>/<ПРОДУКТ>_RISK_MODEL.md
 4. products/<Продукт>/DECISION_ENGINE.md
