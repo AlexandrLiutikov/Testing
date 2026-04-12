@@ -10,6 +10,16 @@ import os
 from typing import List, Optional
 
 from shared.infra.ocr import find_token_bbox, has_tokens, ocr_image
+from shared.infra.geometry import (
+    Rect,
+    build_standard_regions,
+    is_below,
+    is_contained,
+    is_left_aligned,
+    normalize_rect,
+    overlap_ratio,
+    rect_from_bbox,
+)
 from shared.infra.model_loader import load_yaml_model
 from shared.infra.screenshots import take_screenshot
 from shared.infra.verification import (
@@ -45,6 +55,26 @@ DEFAULT_FULL_VIEW_TOP_MAX_RATIO = float(
 DEFAULT_FULL_VIEW_BOTTOM_MIN_RATIO = float(
     _REFERENCE_DOC_LAYOUT_TOLERANCES.get("full_view_bottom_min_ratio", 0.55)
 )
+
+
+def _image_rect(screenshot_path: str) -> Rect:
+    from PIL import Image
+
+    with Image.open(screenshot_path) as image:
+        width, height = image.size
+    return Rect(left=0, top=0, right=width, bottom=height)
+
+
+def _image_regions(screenshot_path: str) -> dict:
+    return build_standard_regions(_image_rect(screenshot_path))
+
+
+def _first_token_rect(screenshot_path: str, tokens: List[str]) -> Optional[tuple]:
+    for token in tokens:
+        bbox = find_token_bbox(screenshot_path, token)
+        if bbox:
+            return token, rect_from_bbox(bbox)
+    return None
 
 
 def assert_window_exists(
@@ -207,76 +237,239 @@ def assert_reference_document_page_full_view(
             },
         )
 
+    result = assert_full_page_visible(
+        screenshot_path=screenshot_path,
+        top_tokens=list(markers.get("top", [])),
+        bottom_tokens=list(markers.get("bottom", [])),
+        capture=capture,
+        top_max_ratio=top_max_ratio,
+        bottom_min_ratio=bottom_min_ratio,
+    )
+    result.evidence["page_index"] = page_index
+    return result
+
+
+def assert_element_in_region(
+    screenshot_path: str,
+    token: str,
+    region_name: str = "workspace",
+    capture: bool = True,
+    tolerance_px: int = 0,
+) -> VerificationResult:
+    """Проверить, что OCR-элемент находится внутри заданного канонического региона."""
     if capture:
         take_screenshot(screenshot_path)
-    ocr_text = ocr_image(screenshot_path)
-    top_ok, top_found = has_tokens(ocr_text, markers.get("top", []), need=1)
-    bottom_ok, bottom_found = has_tokens(ocr_text, markers.get("bottom", []), need=1)
+    regions = _image_regions(screenshot_path)
+    if region_name not in regions:
+        return build_result(
+            ok=False,
+            sources_used=["geometry"],
+            signal_strength=0.0,
+            evidence={"reason": "UNKNOWN_REGION", "region_name": region_name},
+        )
 
-    found = [f"top:{token}" for token in top_found]
-    found.extend([f"bottom:{token}" for token in bottom_found])
-    if top_ok and bottom_ok:
+    bbox = find_token_bbox(screenshot_path, token)
+    if not bbox:
+        return build_result(
+            ok=False,
+            sources_used=["geometry", "feature_visual"],
+            signal_strength=0.0,
+            evidence={"reason": "TOKEN_NOT_FOUND", "token": token, "region_name": region_name},
+        )
+
+    element_rect = rect_from_bbox(bbox)
+    region_rect = regions[region_name]
+    ok = is_contained(element_rect, region_rect, tolerance_px=tolerance_px)
+    return build_result(
+        ok=ok,
+        sources_used=["geometry", "feature_visual"],
+        signal_strength=1.0 if ok else overlap_ratio(element_rect, region_rect, relative_to="a"),
+        tolerance_applied=[f"containment_tolerance_px={tolerance_px}"],
+        evidence={
+            "token": token,
+            "region_name": region_name,
+            "element_bbox": bbox,
+            "region_bbox": {
+                "left": region_rect.left,
+                "top": region_rect.top,
+                "right": region_rect.right,
+                "bottom": region_rect.bottom,
+            },
+            "element_normalized": normalize_rect(element_rect, regions["window"]).to_dict(),
+            "region_normalized": normalize_rect(region_rect, regions["window"]).to_dict(),
+            "screenshot_path": screenshot_path,
+        },
+    )
+
+
+def assert_left_aligned(
+    screenshot_path: str,
+    token: str,
+    reference_region: str = "page",
+    capture: bool = True,
+    max_offset_ratio: float = 0.08,
+) -> VerificationResult:
+    """Проверить, что элемент выровнен по левому краю reference-региона."""
+    if capture:
+        take_screenshot(screenshot_path)
+    regions = _image_regions(screenshot_path)
+    if reference_region not in regions:
+        return build_result(
+            ok=False,
+            sources_used=["geometry"],
+            signal_strength=0.0,
+            evidence={"reason": "UNKNOWN_REGION", "reference_region": reference_region},
+        )
+
+    bbox = find_token_bbox(screenshot_path, token)
+    if not bbox:
+        return build_result(
+            ok=False,
+            sources_used=["geometry", "feature_visual"],
+            signal_strength=0.0,
+            evidence={"reason": "TOKEN_NOT_FOUND", "token": token},
+        )
+
+    element_rect = rect_from_bbox(bbox)
+    ref_rect = regions[reference_region]
+    ok = is_left_aligned(element_rect, ref_rect, max_offset_ratio=max_offset_ratio)
+    offset_ratio = (element_rect.left - ref_rect.left) / float(max(1, ref_rect.width))
+    return build_result(
+        ok=ok,
+        sources_used=["geometry"],
+        signal_strength=1.0 if ok else max(0.0, 1.0 - abs(offset_ratio - max_offset_ratio)),
+        tolerance_applied=[f"left_offset_ratio<={max_offset_ratio}"],
+        evidence={
+            "token": token,
+            "reference_region": reference_region,
+            "element_bbox": bbox,
+            "offset_ratio": offset_ratio,
+            "max_offset_ratio": max_offset_ratio,
+            "screenshot_path": screenshot_path,
+        },
+    )
+
+
+def assert_full_page_visible(
+    screenshot_path: str,
+    top_tokens: List[str],
+    bottom_tokens: List[str],
+    capture: bool = True,
+    top_max_ratio: float = DEFAULT_FULL_VIEW_TOP_MAX_RATIO,
+    bottom_min_ratio: float = DEFAULT_FULL_VIEW_BOTTOM_MIN_RATIO,
+) -> VerificationResult:
+    """Проверить, что верх и низ страницы одновременно видимы в области page."""
+    if capture:
+        take_screenshot(screenshot_path)
+    regions = _image_regions(screenshot_path)
+    page_rect = regions["page"]
+
+    top_hit = _first_token_rect(screenshot_path, top_tokens)
+    bottom_hit = _first_token_rect(screenshot_path, bottom_tokens)
+    if not top_hit or not bottom_hit:
+        found = []
+        if top_hit:
+            found.append(f"top:{top_hit[0]}")
+        if bottom_hit:
+            found.append(f"bottom:{bottom_hit[0]}")
         return result_from_token_match(
             source="geometry",
-            ok=True,
+            ok=False,
             found_tokens=found,
-            expected_tokens=markers.get("top", []) + markers.get("bottom", []),
+            expected_tokens=list(top_tokens) + list(bottom_tokens),
             need=2,
             tolerance_applied=[
                 f"full_view_top_max_ratio={top_max_ratio}",
                 f"full_view_bottom_min_ratio={bottom_min_ratio}",
             ],
-            evidence={"page_index": page_index},
+            evidence={"screenshot_path": screenshot_path},
         )
 
-    if bottom_ok:
-        content_tokens = REFERENCE_DOC_PAGE_TOKENS.get(page_index, [])
-        relaxed_top_tokens = [t for t in content_tokens if "Страница" not in t]
-        relaxed_top_ok, relaxed_top_found = has_tokens(ocr_text, relaxed_top_tokens, need=1)
-        if relaxed_top_ok:
-            found.extend([f"top_relaxed:{token}" for token in relaxed_top_found])
-            return result_from_token_match(
-                source="geometry",
-                ok=True,
-                found_tokens=found,
-                expected_tokens=markers.get("top", []) + markers.get("bottom", []),
-                need=2,
-                tolerance_applied=[
-                    f"full_view_top_max_ratio={top_max_ratio}",
-                    f"full_view_bottom_min_ratio={bottom_min_ratio}",
-                    "RELAXED_TOP_MARKERS",
-                ],
-                evidence={"page_index": page_index},
-            )
+    top_token, top_rect = top_hit
+    bottom_token, bottom_rect = bottom_hit
+    top_ratio = (top_rect.center_y - page_rect.top) / float(max(1, page_rect.height))
+    bottom_ratio = (bottom_rect.center_y - page_rect.top) / float(max(1, page_rect.height))
 
-        # Последняя страница может содержать только колонтитулы и номер страницы.
-        if page_index == 4:
-            found.append("top_relaxed:PAGE4_BOTTOM_ONLY")
-            return result_from_token_match(
-                source="geometry",
-                ok=True,
-                found_tokens=found,
-                expected_tokens=markers.get("top", []) + markers.get("bottom", []),
-                need=2,
-                tolerance_applied=[
-                    f"full_view_top_max_ratio={top_max_ratio}",
-                    f"full_view_bottom_min_ratio={bottom_min_ratio}",
-                    "PAGE4_BOTTOM_ONLY_ALLOWED",
-                ],
-                evidence={"page_index": page_index},
-            )
+    top_ok = is_contained(top_rect, page_rect) and top_ratio <= top_max_ratio
+    bottom_ok = is_contained(bottom_rect, page_rect) and bottom_ratio >= bottom_min_ratio
+    ok = top_ok and bottom_ok
 
-    return result_from_token_match(
-        source="geometry",
-        ok=False,
-        found_tokens=found,
-        expected_tokens=markers.get("top", []) + markers.get("bottom", []),
-        need=2,
+    return build_result(
+        ok=ok,
+        sources_used=["geometry", "feature_visual"],
+        signal_strength=1.0 if ok else 0.5,
         tolerance_applied=[
             f"full_view_top_max_ratio={top_max_ratio}",
             f"full_view_bottom_min_ratio={bottom_min_ratio}",
         ],
-        evidence={"page_index": page_index},
+        evidence={
+            "found_tokens": [f"top:{top_token}", f"bottom:{bottom_token}"],
+            "top_token_bbox": {
+                "left": top_rect.left,
+                "top": top_rect.top,
+                "right": top_rect.right,
+                "bottom": top_rect.bottom,
+            },
+            "bottom_token_bbox": {
+                "left": bottom_rect.left,
+                "top": bottom_rect.top,
+                "right": bottom_rect.right,
+                "bottom": bottom_rect.bottom,
+            },
+            "top_ratio": top_ratio,
+            "bottom_ratio": bottom_ratio,
+            "page_normalized": normalize_rect(page_rect, regions["window"]).to_dict(),
+            "screenshot_path": screenshot_path,
+        },
+    )
+
+
+def assert_toolbar_content_below_active_tab(
+    screenshot_path: str,
+    active_tab_token: str,
+    content_token: str,
+    capture: bool = True,
+    min_gap_px: int = 0,
+) -> VerificationResult:
+    """Проверить, что контент вкладки расположен ниже активной вкладки toolbar."""
+    if capture:
+        take_screenshot(screenshot_path)
+    regions = _image_regions(screenshot_path)
+    tab_bbox = find_token_bbox(screenshot_path, active_tab_token)
+    content_bbox = find_token_bbox(screenshot_path, content_token)
+    if not tab_bbox or not content_bbox:
+        return build_result(
+            ok=False,
+            sources_used=["geometry", "feature_visual"],
+            signal_strength=0.0,
+            evidence={
+                "reason": "TOKEN_NOT_FOUND",
+                "active_tab_token": active_tab_token,
+                "content_token": content_token,
+            },
+        )
+
+    tab_rect = rect_from_bbox(tab_bbox)
+    content_rect = rect_from_bbox(content_bbox)
+    toolbar_ok = is_contained(tab_rect, regions["toolbar"], tolerance_px=2)
+    workspace_ok = is_contained(content_rect, regions["workspace"], tolerance_px=2)
+    below_ok = is_below(content_rect, tab_rect, min_gap_px=min_gap_px)
+    ok = toolbar_ok and workspace_ok and below_ok
+    return build_result(
+        ok=ok,
+        sources_used=["geometry", "feature_visual"],
+        signal_strength=1.0 if ok else 0.5,
+        tolerance_applied=[f"min_gap_px={min_gap_px}"],
+        evidence={
+            "active_tab_token": active_tab_token,
+            "content_token": content_token,
+            "tab_bbox": tab_bbox,
+            "content_bbox": content_bbox,
+            "toolbar_ok": toolbar_ok,
+            "workspace_ok": workspace_ok,
+            "below_ok": below_ok,
+            "screenshot_path": screenshot_path,
+        },
     )
 
 
@@ -472,8 +665,6 @@ def assert_text_entered_and_left_aligned(
     2) Якорный токен (`anchor_token`) найден на скриншоте и его координата X
        находится в левой части страницы (<= max_left_ratio * width).
     """
-    from PIL import Image
-
     take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
     text_ok, found = has_tokens(ocr_text, tokens, need)
@@ -488,37 +679,15 @@ def assert_text_entered_and_left_aligned(
     if not text_ok:
         return text_result
 
-    bbox = find_token_bbox(screenshot_path, anchor_token)
-    if not bbox:
-        return build_result(
-            ok=False,
-            sources_used=["semantic_content_model", "geometry", "ocr_fallback"],
-            signal_strength=text_result.signal_strength * 0.5,
-            evidence={
-                "found_tokens": text_result.found_tokens,
-                "anchor_token": anchor_token,
-                "anchor_bbox": None,
-                "screenshot_path": screenshot_path,
-            },
-        )
-
-    image_width = Image.open(screenshot_path).size[0]
-    left_aligned = bbox["left"] <= int(image_width * max_left_ratio)
-    geometry_result = build_result(
-        ok=left_aligned,
-        sources_used=["geometry"],
-        signal_strength=1.0 if left_aligned else 0.0,
-        tolerance_applied=[f"anchor_left_ratio<={max_left_ratio}"],
-        evidence={
-            "found_tokens": text_result.found_tokens,
-            "anchor_token": anchor_token,
-            "anchor_bbox": bbox,
-            "image_width": image_width,
-            "max_left_ratio": max_left_ratio,
-            "anchor_left_ratio": float(bbox["left"]) / float(image_width or 1),
-            "screenshot_path": screenshot_path,
-        },
+    geometry_result = assert_left_aligned(
+        screenshot_path=screenshot_path,
+        token=anchor_token,
+        reference_region="page",
+        capture=False,
+        max_offset_ratio=max_left_ratio,
     )
+    geometry_result.sources_used.insert(0, "semantic_content_model")
+    geometry_result.evidence["found_tokens"] = text_result.found_tokens
     return merge_results(
         [text_result, geometry_result],
         mode="all",
