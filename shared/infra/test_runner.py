@@ -73,6 +73,11 @@ def _write_artefacts(
     warning_steps = sum(1 for s in steps if s.get("warnings"))
     warnings_total = sum(len(s.get("warnings", [])) for s in steps)
     fallback_steps = sum(1 for s in steps if s.get("fallback_source"))
+    signal_strength_counts = {
+        "STRONG": sum(1 for s in steps if s.get("signal_strength") == "STRONG"),
+        "MEDIUM": sum(1 for s in steps if s.get("signal_strength") == "MEDIUM"),
+        "WEAK": sum(1 for s in steps if s.get("signal_strength") == "WEAK"),
+    }
 
     results_data = {
         "environment": env,
@@ -87,6 +92,7 @@ def _write_artefacts(
             "warning_steps": warning_steps,
             "warnings_total": warnings_total,
             "fallback_steps": fallback_steps,
+            "signal_strength_counts": signal_strength_counts,
         },
         "release_decision": decision,
         "run_confidence": decision.get("run_confidence"),
@@ -204,6 +210,9 @@ class CaseRunner:
                 warnings=kwargs.get("warnings"),
                 fallback_source=kwargs.get("fallback_source"),
                 fallback_reason=kwargs.get("fallback_reason"),
+                verification_sources=kwargs.get("verification_sources"),
+                signal_strength=kwargs.get("signal_strength"),
+                signal_notes=kwargs.get("signal_notes"),
             )
         elif status == "FAIL":
             step_obj = StepResult.make_fail(
@@ -222,6 +231,9 @@ class CaseRunner:
                 warnings=kwargs.get("warnings"),
                 fallback_source=kwargs.get("fallback_source"),
                 fallback_reason=kwargs.get("fallback_reason"),
+                verification_sources=kwargs.get("verification_sources"),
+                signal_strength=kwargs.get("signal_strength"),
+                signal_notes=kwargs.get("signal_notes"),
             )
         elif status == "BLOCKED":
             step_obj = StepResult.make_blocked(
@@ -237,6 +249,9 @@ class CaseRunner:
                 warnings=kwargs.get("warnings"),
                 fallback_source=kwargs.get("fallback_source"),
                 fallback_reason=kwargs.get("fallback_reason"),
+                verification_sources=kwargs.get("verification_sources"),
+                signal_strength=kwargs.get("signal_strength"),
+                signal_notes=kwargs.get("signal_notes"),
             )
         else:
             raise ValueError(f"Неподдерживаемый статус шага: {status}")

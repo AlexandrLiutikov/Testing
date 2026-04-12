@@ -23,6 +23,21 @@ def _warnings_text(step: dict) -> str:
             fb += f" ({fallback_reason})"
         chunks.append(fb)
 
+    sources = step.get("verification_sources", []) or []
+    signal_strength = step.get("signal_strength")
+    signal_notes = step.get("signal_notes", []) or []
+    if signal_strength or sources:
+        signal_chunk = "SIGNAL"
+        if signal_strength:
+            signal_chunk += f": {signal_strength}"
+        if sources:
+            signal_chunk += f" via {', '.join(str(s) for s in sources)}"
+        chunks.append(signal_chunk)
+    for note in signal_notes:
+        note_text = str(note).strip()
+        if note_text:
+            chunks.append(f"SIGNAL_NOTE: {note_text}")
+
     return " | ".join(chunks)
 
 
@@ -270,6 +285,9 @@ def write_csv(csv_path: str, steps: list):
         "fallback_source",
         "fallback_reason",
         "warnings",
+        "verification_sources",
+        "signal_strength",
+        "signal_notes",
         "expected",
         "actual",
         "screenshot",

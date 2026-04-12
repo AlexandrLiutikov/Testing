@@ -12,6 +12,11 @@ import time
 from typing import Optional
 
 from shared.infra.screenshots import take_screenshot
+from shared.infra.step_results import (
+    infer_signal_strength,
+    normalize_signal_notes,
+    normalize_verification_sources,
+)
 
 
 class DurationTimer:
@@ -103,6 +108,9 @@ class StepVerifier:
         self._warnings = []
         self._fallback_source = None
         self._fallback_reason = None
+        self._verification_sources = []
+        self._signal_strength = None
+        self._signal_notes = []
 
     # --- context manager --------------------------------------------------
 
@@ -156,9 +164,67 @@ class StepVerifier:
         self._fallback_source = source
         self._fallback_reason = reason
 
+    def add_verification_source(self, source: str):
+        """Добавить источник подтверждения шага (DOM/OCR/GEOMETRY...)."""
+        self._verification_sources = normalize_verification_sources(
+            [*self._verification_sources, source]
+        )
+
+    def add_verification_sources(self, sources):
+        """Добавить несколько источников подтверждения шага."""
+        self._verification_sources = normalize_verification_sources(
+            [*self._verification_sources, *(sources or [])]
+        )
+
+    def set_signal_strength(self, signal_strength: str):
+        """Явно задать силу сигнала шага."""
+        self._signal_strength = signal_strength
+
+    def add_signal_note(self, note: str):
+        """Добавить пояснение по качеству сигнала."""
+        self._signal_notes = normalize_signal_notes([*self._signal_notes, note])
+
+    def apply_trace(self, trace: Optional[dict]):
+        """Применить унифицированный trace из actions/assertions."""
+        if not trace:
+            return
+
+        fallback_source = trace.get("fallback_source")
+        fallback_reason = trace.get("fallback_reason")
+        if fallback_source:
+            self.set_fallback(str(fallback_source), str(fallback_reason or ""))
+
+        for warning in trace.get("warnings", []) or []:
+            self.add_warning(
+                code=str(warning.get("code", "TRACE_WARNING")),
+                message=str(warning.get("message", "")),
+                severity=str(warning.get("severity", "LOW")).upper(),
+            )
+
+        sources = trace.get("verification_sources")
+        if sources is None and trace.get("verification_source"):
+            sources = [trace.get("verification_source")]
+        if isinstance(sources, str):
+            sources = [sources]
+        self.add_verification_sources(sources or [])
+
+        strength = trace.get("signal_strength")
+        if strength:
+            self.set_signal_strength(str(strength))
+
+        notes = trace.get("signal_notes")
+        if isinstance(notes, str):
+            notes = [notes]
+        for note in notes or []:
+            self.add_signal_note(str(note))
+
     # --- internal ---------------------------------------------------------
 
     def _record_fail(self, detail: str):
+        signal_strength = infer_signal_strength(
+            self._verification_sources,
+            self._signal_strength,
+        )
         self._runner.add_step(
             step_num=self._step_num,
             step_name=self._step_name,
@@ -173,9 +239,16 @@ class StepVerifier:
                 warnings=self._warnings,
                 fallback_source=self._fallback_source,
                 fallback_reason=self._fallback_reason,
+                verification_sources=self._verification_sources,
+                signal_strength=signal_strength,
+                signal_notes=self._signal_notes,
         )
 
     def _record_pass(self):
+        signal_strength = infer_signal_strength(
+            self._verification_sources,
+            self._signal_strength,
+        )
         self._runner.add_step(
             step_num=self._step_num,
             step_name=self._step_name,
@@ -187,4 +260,7 @@ class StepVerifier:
             warnings=self._warnings,
             fallback_source=self._fallback_source,
             fallback_reason=self._fallback_reason,
+            verification_sources=self._verification_sources,
+            signal_strength=signal_strength,
+            signal_notes=self._signal_notes,
         )
