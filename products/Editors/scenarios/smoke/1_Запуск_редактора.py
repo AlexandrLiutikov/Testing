@@ -35,6 +35,7 @@ from shared.lifecycle import app_lifecycle
 # === Продуктовый слой ===
 from products.Editors.actions.editor_actions import dismiss_warning
 from products.Editors.assertions.editor_assertions import (
+    assert_window_exists,
     assert_warning_visible,
     assert_warning_closed,
 )
@@ -126,8 +127,10 @@ def main():
                         "debug -> standard (без debug-флага)."
                     ),
                 )
+            window_result = assert_window_exists(process_name="editors", timeout_sec=3)
+            apply_verification_result(step, window_result, context="window_visible")
             step.check(
-                condition=pid is not None,
+                condition=bool(window_result),
                 pass_msg="Окно редактора найдено, процесс активен",
                 fail_msg="Окно редактора не найдено после запуска",
             )

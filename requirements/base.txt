@@ -1,3 +1,4 @@
 pyautogui          # скриншоты, мышь, клавиатура (все ОС)
 Pillow             # работа с изображениями
 pytesseract        # OCR через Tesseract
+PyYAML             # загрузка YAML-моделей (shared/infra/model_loader.py)
