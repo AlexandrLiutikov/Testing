@@ -42,6 +42,7 @@ from products.Editors.assertions.editor_assertions import (
 from products.Editors.assertions.ui_catalog import (
     TOOLBAR_TABS,
     diff_ui_items,
+    diff_ui_items_normalized,
     toolbar_tab_controls_expected,
     toolbar_tab_warning_expected_names,
 )
@@ -153,7 +154,7 @@ def _toolbar_drift_warnings(active_tab_name: str = ""):
     if not controls_observed:
         return out
 
-    controls_drift = diff_ui_items(controls_observed, expected_controls)
+    controls_drift = diff_ui_items_normalized(controls_observed, expected_controls)
     for item in controls_drift.get("extra", [])[:8]:
         out.append({
             "code": "UI_NEW_ELEMENT",
