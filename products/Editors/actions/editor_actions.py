@@ -650,12 +650,85 @@ def list_toolbar_tabs_dom() -> list:
     const r = el.getBoundingClientRect();
     return r.width > 6 && r.height > 6 && r.top < 220;
   };
-  const items = Array.from(doc.querySelectorAll('a,button,div,span,[role="tab"]'))
-    .filter(isVisible)
-    .map(el => (el.textContent || '').trim())
+  const normalize = (raw) => (raw || '')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  // Основной путь: забираем только реальные tab-элементы верхней ленты.
+  const tabNodes = Array.from(
+    doc.querySelectorAll(
+      '.tabs li.ribtab > a[data-tab], li.ribtab > a[data-tab], [role="tab"][data-tab], [data-tab][data-title]'
+    )
+  ).filter(isVisible);
+
+  let items = tabNodes
+    .map(el => normalize(el.getAttribute('data-title') || el.textContent || ''))
     .filter(Boolean);
-  const uniq = Array.from(new Set(items)).slice(0, 120);
+
+  // Fallback для сборок/тем, где структура табов отличается.
+  if (!items.length) {
+    items = Array.from(doc.querySelectorAll('a,button,div,span,[role="tab"]'))
+      .filter(isVisible)
+      .map(el => normalize(el.textContent || ''))
+      .filter(Boolean);
+  }
+
+  const uniq = Array.from(new Set(items))
+    .filter(label => label.length <= 40)
+    .slice(0, 40);
   return {ok:true, items: uniq};
+"""
+    )
+    if isinstance(result, dict):
+        items = result.get("items")
+        if isinstance(items, list):
+            return [str(x).strip() for x in items if str(x).strip()]
+    return []
+
+
+def list_active_toolbar_controls_dom() -> list:
+    """Вернуть список видимых текстовых контролов активной вкладки ленты."""
+    result = _cdp_eval_in_editor_frame(
+        """
+  const normalize = (raw) => (raw || '')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  const isVisible = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 6 && r.height > 6;
+  };
+
+  const topBandMin = window.innerHeight * 0.08;
+  const topBandMax = window.innerHeight * 0.38;
+
+  const tabLabels = new Set(
+    Array.from(doc.querySelectorAll('.tabs li.ribtab > a[data-tab], li.ribtab > a[data-tab]'))
+      .map(el => normalize(el.getAttribute('data-title') || el.textContent || ''))
+      .filter(Boolean)
+  );
+
+  const isToolbarControl = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.top < topBandMin || r.top > topBandMax) return false;
+    if (el.closest('.tabs') || el.closest('li.ribtab')) return false;
+    if (el.hasAttribute('data-tab') || el.getAttribute('role') === 'tab') return false;
+    return true;
+  };
+
+  const rawItems = Array.from(doc.querySelectorAll('button, a, span, div, label'))
+    .filter(isVisible)
+    .filter(isToolbarControl)
+    .map(el => normalize(el.textContent || ''))
+    .filter(Boolean)
+    .filter(text => text.length >= 2 && text.length <= 64)
+    .filter(text => !tabLabels.has(text));
+
+  const uniq = Array.from(new Set(rawItems)).slice(0, 120);
+  return {ok: true, items: uniq};
 """
     )
     if isinstance(result, dict):
@@ -1072,6 +1145,47 @@ _DOC_LABELS = {
     "presentation": "Презентация",
 }
 
+_DOC_ACTIONS = {
+    "document": "new:docx",
+    "spreadsheet": "new:xlsx",
+    "presentation": "new:pptx",
+}
+
+
+def _cdp_click_new_document_tile(doc_type: str) -> bool:
+    """Кликнуть по плитке создания документа на стартовом экране через DOM/CDP."""
+    action = _DOC_ACTIONS.get(doc_type)
+    if not action:
+        return False
+
+    result = _cdp_eval_root(
+        f"""
+  const action = {json.dumps(action)};
+  const isVisible = (el) => {{
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8;
+  }};
+
+  const candidates = Array.from(
+    document.querySelectorAll(
+      `li.big-icon-item a.big-icon-item__link[action="${{action}}"], a[action="${{action}}"]`
+    )
+  ).filter(isVisible);
+
+  if (!candidates.length) {{
+    return {{ok:false, reason:'tile_not_found', action}};
+  }}
+
+  const tile = candidates[0];
+  tile.click();
+  return {{ok:true, action}};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
+
 
 def open_document_by_path(
     editor_path: str,
@@ -1143,6 +1257,10 @@ def create_document(pid: int, doc_type: str = "document",
     driver = get_driver()
     driver.activate_window(pid)
 
+    # Основной путь: DOM/CDP клик по action-элементу плитки создания файла.
+    if _cdp_click_new_document_tile(doc_type):
+        return _trace("create_document", True, "DOM_CDP")
+
     # Свежий скриншот стартового экрана для OCR-калибровки
     import tempfile, os as _os
     if not screenshot_path:
@@ -1169,7 +1287,10 @@ def create_document(pid: int, doc_type: str = "document",
         "OCR",
         fallback_used=True,
         fallback_source="OCR_CREATE_DOCUMENT",
-        fallback_reason="Создание документа выполнено OCR-кликом на стартовом экране.",
+        fallback_reason=(
+            "DOM/CDP-клик плитки создания документа недоступен; "
+            "выполнен OCR fallback на стартовом экране."
+        ),
     )
 
 

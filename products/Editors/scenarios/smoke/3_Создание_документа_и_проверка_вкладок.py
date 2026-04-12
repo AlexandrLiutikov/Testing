@@ -32,6 +32,7 @@ from products.Editors.actions.editor_actions import (
     create_document,
     click_toolbar_tab,
     calibrate_toolbar_tabs,
+    list_active_toolbar_controls_dom,
     list_toolbar_tabs_dom,
 )
 from products.Editors.assertions.editor_assertions import (
@@ -41,7 +42,9 @@ from products.Editors.assertions.editor_assertions import (
 from products.Editors.assertions.ui_catalog import (
     TOOLBAR_TABS,
     diff_ui_items,
-    toolbar_tab_names,
+    diff_ui_items_normalized,
+    toolbar_tab_controls_expected,
+    toolbar_tab_warning_expected_names,
 )
 
 
@@ -99,13 +102,10 @@ def _add_blocked_tabs(runner, reason):
         )
 
 
-def _toolbar_drift_warnings():
+def _toolbar_drift_warnings(active_tab_name: str = ""):
     observed_raw = list_toolbar_tabs_dom()
-    if not observed_raw:
-        return []
-
     observed = []
-    for item in observed_raw:
+    for item in observed_raw or []:
         text = " ".join(str(item).split())
         if not text:
             continue
@@ -115,22 +115,51 @@ def _toolbar_drift_warnings():
             continue
         observed.append(text)
 
-    if not observed:
-        return []
-
-    drift = diff_ui_items(observed, toolbar_tab_names())
     out = []
-    for item in drift.get("extra", [])[:6]:
+    if observed:
+        drift = diff_ui_items(observed, toolbar_tab_warning_expected_names())
+        for item in drift.get("extra", [])[:6]:
+            out.append({
+                "code": "UI_NEW_ELEMENT",
+                "severity": "LOW",
+                "message": f"Обнаружена новая вкладка/элемент панели: «{item}».",
+            })
+        for item in drift.get("missing", [])[:6]:
+            out.append({
+                "code": "UI_MISSING_ELEMENT",
+                "severity": "LOW",
+                "message": f"Ожидаемая вкладка «{item}» не обнаружена в DOM-каталоге.",
+            })
+
+    active = str(active_tab_name or "").strip()
+    if not active:
+        return out
+
+    expected_controls = toolbar_tab_controls_expected(active)
+    if not expected_controls:
+        return out
+
+    controls_raw = list_active_toolbar_controls_dom()
+    controls_observed = []
+    for item in controls_raw:
+        text = " ".join(str(item).split())
+        if not text:
+            continue
+        if len(text) > 64:
+            continue
+        if not re.fullmatch(r"[A-Za-zА-Яа-яЁё0-9\-\s]{2,64}", text):
+            continue
+        controls_observed.append(text)
+
+    if not controls_observed:
+        return out
+
+    controls_drift = diff_ui_items_normalized(controls_observed, expected_controls)
+    for item in controls_drift.get("extra", [])[:8]:
         out.append({
             "code": "UI_NEW_ELEMENT",
             "severity": "LOW",
-            "message": f"Обнаружена новая вкладка/элемент панели: «{item}».",
-        })
-    for item in drift.get("missing", [])[:6]:
-        out.append({
-            "code": "UI_MISSING_ELEMENT",
-            "severity": "LOW",
-            "message": f"Ожидаемая вкладка «{item}» не обнаружена в DOM-каталоге.",
+            "message": f"Вкладка «{active}»: обнаружен новый элемент панели «{item}».",
         })
     return out
 
@@ -158,7 +187,7 @@ def _run_tab_step(runner, pid, tab_data, positions=None):
             primary_modes=("DOM_CDP", "DOM_FOCUS"),
         )
         apply_verification_result(step, tab_result, context=f"tab:{tab_name}")
-        for w in _toolbar_drift_warnings():
+        for w in _toolbar_drift_warnings(tab_name):
             step.add_warning(
                 code=w["code"],
                 severity=w["severity"],

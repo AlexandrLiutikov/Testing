@@ -40,6 +40,18 @@ class Rect:
     def to_tuple(self) -> Tuple[int, int, int, int]:
         return (self.left, self.top, self.right, self.bottom)
 
+    def to_dict(self) -> Dict[str, int]:
+        return {
+            "left": self.left,
+            "top": self.top,
+            "right": self.right,
+            "bottom": self.bottom,
+            "width": self.width,
+            "height": self.height,
+            "center_x": self.center_x,
+            "center_y": self.center_y,
+        }
+
 
 @dataclass(frozen=True)
 class NormalizedRect:
