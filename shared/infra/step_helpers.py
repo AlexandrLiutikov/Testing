@@ -17,6 +17,7 @@ from shared.infra.step_results import (
     normalize_signal_notes,
     normalize_verification_sources,
 )
+from shared.infra.verification import bucket_signal_strength
 
 
 class DurationTimer:
@@ -264,3 +265,53 @@ class StepVerifier:
             signal_strength=signal_strength,
             signal_notes=self._signal_notes,
         )
+
+
+def apply_action_trace(
+    step: StepVerifier,
+    trace: Optional[dict],
+    action_name: str,
+    primary_modes=None,
+) -> None:
+    """Attach action trace with unified fallback/warning behavior."""
+    if not trace:
+        return
+
+    step.apply_trace(trace)
+    mode = str(trace.get("mode", "")).strip()
+    if mode and primary_modes and mode not in set(primary_modes):
+        step.add_warning(
+            code=f"{action_name.upper()}_MODE",
+            severity="LOW",
+            message=f"Action выполнился в режиме {mode}, а не в primary-пути.",
+        )
+    if mode:
+        step.add_signal_note(f"action_mode={mode}")
+
+
+def apply_verification_result(
+    step: StepVerifier,
+    result,
+    context: str = "assertion",
+) -> None:
+    """Promote VerificationResult to step-level signal metadata."""
+    if result is None:
+        return
+
+    sources = list(getattr(result, "sources_used", []) or [])
+    if sources:
+        step.add_verification_sources(sources)
+
+    score = float(getattr(result, "signal_strength", 0.0) or 0.0)
+    step.set_signal_strength(bucket_signal_strength(score))
+    step.add_signal_note(f"{context}.score={score:.2f}")
+
+    tolerances = list(getattr(result, "tolerance_applied", []) or [])
+    for tolerance in tolerances:
+        step.add_signal_note(f"{context}.tolerance={tolerance}")
+
+    evidence = dict(getattr(result, "evidence", {}) or {})
+    found_tokens = evidence.get("found_tokens", [])
+    if isinstance(found_tokens, list) and found_tokens:
+        preview = ", ".join(str(token) for token in found_tokens[:4])
+        step.add_signal_note(f"{context}.tokens={preview}")

@@ -138,3 +138,13 @@ def merge_results(
         tolerance_applied=tolerance_applied,
         evidence=merged_evidence,
     )
+
+
+def bucket_signal_strength(score: float) -> str:
+    """Convert numeric confidence [0..1] into StepResult bucket."""
+    value = max(0.0, min(1.0, float(score)))
+    if value >= 0.85:
+        return "STRONG"
+    if value >= 0.55:
+        return "MEDIUM"
+    return "WEAK"
