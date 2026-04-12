@@ -17,7 +17,13 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from shared.infra import CaseRunner, StepVerifier, capture_step
+from shared.infra import (
+    CaseRunner,
+    StepVerifier,
+    apply_action_trace,
+    apply_verification_result,
+    capture_step,
+)
 from shared.infra.waits import wait_main_proc, wait_until
 from shared.drivers import get_driver
 
@@ -35,32 +41,6 @@ CASE_META = {
     "risk_level": "HIGH",
     "critical_path": True,
 }
-
-
-def _attach_action_trace(step, trace: dict, action_name: str):
-    if not trace:
-        return
-
-    if trace.get("fallback_used"):
-        step.set_fallback(
-            trace.get("fallback_source", ""),
-            trace.get("fallback_reason", ""),
-        )
-
-    mode = str(trace.get("mode", "")).strip()
-    if mode and mode not in ("DOM_CDP", "DOM_FOCUS"):
-        step.add_warning(
-            code=f"{action_name.upper()}_MODE",
-            severity="LOW",
-            message=f"Action выполнился в режиме {mode}, а не в DOM primary.",
-        )
-
-    for w in trace.get("warnings", []) or []:
-        step.add_warning(
-            code=w.get("code", "ACTION_WARNING"),
-            severity=w.get("severity", "LOW"),
-            message=w.get("message", ""),
-        )
 
 
 TEXT_TO_TYPE = (
@@ -145,17 +125,19 @@ def main():
         )
 
         last_ok = False
+        last_text_result = None
 
         def _probe_text_ready() -> bool:
-            nonlocal last_ok
+            nonlocal last_ok, last_text_result
             driver.activate_window(pid)
-            last_ok, _ = assert_text_entered_and_left_aligned(
+            last_text_result = assert_text_entered_and_left_aligned(
                 shot,
                 tokens=SMOKE_TEXT_ASSERT_TOKENS,
                 need=2,
                 anchor_token="Задача",
                 max_left_ratio=0.35,
             )
+            last_ok = bool(last_text_result)
             return last_ok
 
         ready = wait_until(_probe_text_ready, timeout_sec=10, poll_interval=1.0)
@@ -170,7 +152,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot)
-            _attach_action_trace(step, input_trace, "type_document_text")
+            apply_action_trace(
+                step,
+                input_trace,
+                "type_document_text",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, last_text_result, context="text_input_left_aligned")
             step.check(
                 condition=ok,
                 pass_msg="Текст введён в документ и расположен у левого поля страницы",

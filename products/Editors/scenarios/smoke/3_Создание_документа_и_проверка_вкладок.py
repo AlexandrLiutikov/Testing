@@ -18,7 +18,13 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from shared.infra import CaseRunner, StepVerifier, capture_step
+from shared.infra import (
+    CaseRunner,
+    StepVerifier,
+    apply_action_trace,
+    apply_verification_result,
+    capture_step,
+)
 from shared.infra.waits import wait_main_proc, wait_until
 from shared.drivers import get_driver
 
@@ -93,32 +99,6 @@ def _add_blocked_tabs(runner, reason):
         )
 
 
-def _attach_action_trace(step, trace: dict, action_name: str):
-    if not trace:
-        return
-
-    if trace.get("fallback_used"):
-        step.set_fallback(
-            trace.get("fallback_source", ""),
-            trace.get("fallback_reason", ""),
-        )
-
-    mode = str(trace.get("mode", "")).strip()
-    if mode and mode not in ("DOM_CDP", "DOM_FOCUS"):
-        step.add_warning(
-            code=f"{action_name.upper()}_MODE",
-            severity="LOW",
-            message=f"Action выполнился в режиме {mode}, а не в DOM primary.",
-        )
-
-    for w in trace.get("warnings", []) or []:
-        step.add_warning(
-            code=w.get("code", "ACTION_WARNING"),
-            severity=w.get("severity", "LOW"),
-            message=w.get("message", ""),
-        )
-
-
 def _toolbar_drift_warnings():
     observed_raw = list_toolbar_tabs_dom()
     if not observed_raw:
@@ -159,7 +139,8 @@ def _run_tab_step(runner, pid, tab_data, positions=None):
     step_num, tab_name, expected, tokens, need = tab_data
     tab_trace = click_toolbar_tab(pid, tab_name, positions=positions)
     shot = capture_step(runner.run_dir, step_num, f"tab_{step_num}", activate_driver=get_driver(), pid=pid)
-    ok, _ = assert_tab_active(shot, tab_name, tokens, need)
+    tab_result = assert_tab_active(shot, tab_name, tokens, need)
+    ok = bool(tab_result)
 
     with StepVerifier(
         runner,
@@ -170,7 +151,13 @@ def _run_tab_step(runner, pid, tab_data, positions=None):
         failure_area="CORE_FUNCTION",
     ) as step:
         step.screenshot(shot)
-        _attach_action_trace(step, tab_trace, "click_toolbar_tab")
+        apply_action_trace(
+            step,
+            tab_trace,
+            "click_toolbar_tab",
+            primary_modes=("DOM_CDP", "DOM_FOCUS"),
+        )
+        apply_verification_result(step, tab_result, context=f"tab:{tab_name}")
         for w in _toolbar_drift_warnings():
             step.add_warning(
                 code=w["code"],
@@ -237,11 +224,13 @@ def main():
             )
             doc_tokens = ["Междустрочный", "Множитель", "Страница", "Количество"]
             last_probe_ok = False
+            last_probe_result = None
 
             def probe_document_created() -> bool:
-                nonlocal last_probe_ok
+                nonlocal last_probe_ok, last_probe_result
                 driver.activate_window(pid)
-                last_probe_ok, _ = assert_document_created(s1_path, tokens=doc_tokens, need=2)
+                last_probe_result = assert_document_created(s1_path, tokens=doc_tokens, need=2)
+                last_probe_ok = bool(last_probe_result)
                 return last_probe_ok
 
             ready = wait_until(
@@ -260,7 +249,13 @@ def main():
                 failure_area="CORE_FUNCTION",
             ) as step:
                 step.screenshot(s1_path)
-                _attach_action_trace(step, create_trace, "create_document")
+                apply_action_trace(
+                    step,
+                    create_trace,
+                    "create_document",
+                    primary_modes=("DOM_CDP", "DOM_FOCUS"),
+                )
+                apply_verification_result(step, last_probe_result, context="document_created")
                 for w in _toolbar_drift_warnings():
                     step.add_warning(
                         code=w["code"],

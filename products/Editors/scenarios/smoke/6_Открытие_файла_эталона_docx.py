@@ -17,7 +17,14 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from shared.infra import CaseRunner, StepVerifier, capture_step
+from shared.infra import (
+    CaseRunner,
+    StepVerifier,
+    apply_action_trace,
+    apply_verification_result,
+    capture_step,
+    merge_results,
+)
 from shared.infra.waits import wait_main_proc, wait_until
 from shared.drivers import get_driver
 
@@ -43,32 +50,6 @@ CASE_META = {
 }
 
 REFERENCE_DOC_NAME = "Document_dlya_proverki_vozmozhnostey_tekstovogo_redaktora.docx"
-
-
-def _attach_action_trace(step, trace: dict, action_name: str):
-    if not trace:
-        return
-
-    if trace.get("fallback_used"):
-        step.set_fallback(
-            trace.get("fallback_source", ""),
-            trace.get("fallback_reason", ""),
-        )
-
-    mode = str(trace.get("mode", "")).strip()
-    if mode and mode not in ("DOM_CDP", "LAUNCH_DEBUG", "KEYBOARD", "MOUSE_WHEEL"):
-        step.add_warning(
-            code=f"{action_name.upper()}_MODE",
-            severity="LOW",
-            message=f"Action выполнился в режиме {mode}, а не в primary-пути.",
-        )
-
-    for w in trace.get("warnings", []) or []:
-        step.add_warning(
-            code=w.get("code", "ACTION_WARNING"),
-            severity=w.get("severity", "LOW"),
-            message=w.get("message", ""),
-        )
 
 
 def main():
@@ -142,14 +123,16 @@ def main():
             pid=pid,
         )
         last_ok = False
+        last_open_result = None
 
         def _probe_opened() -> bool:
-            nonlocal pid, last_ok
+            nonlocal pid, last_ok, last_open_result
             new_pid = wait_main_proc("editors", 2)
             if new_pid:
                 pid = new_pid
             driver.activate_window(pid)
-            last_ok, _ = assert_reference_document_opened(shot1)
+            last_open_result = assert_reference_document_opened(shot1)
+            last_ok = bool(last_open_result)
             return last_ok
 
         opened_ok = wait_until(_probe_opened, timeout_sec=12, poll_interval=1.0) and last_ok
@@ -173,7 +156,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot1)
-            _attach_action_trace(step, open_trace, "open_document_by_path")
+            apply_action_trace(
+                step,
+                open_trace,
+                "open_document_by_path",
+                primary_modes=("DOM_CDP", "LAUNCH_DEBUG", "KEYBOARD", "MOUSE_WHEEL"),
+            )
+            apply_verification_result(step, last_open_result, context="reference_doc_opened")
             step.check(
                 condition=opened_ok,
                 pass_msg=f"Файл «{REFERENCE_DOC_NAME}» открыт",
@@ -192,30 +181,34 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        zoom_label_ok, _ = assert_section_visible(
+        zoom_label_result = assert_section_visible(
             shot2,
             ["По размеру страницы", "Fit Page"],
             need=1,
         )
-        zoom_status_ok, _ = assert_section_visible(
+        zoom_status_result = assert_section_visible(
             shot2,
             ["Масштаб", "100%"],
             need=1,
         )
-        page1_full_ok, page1_full_found = assert_section_visible(
+        page1_full_result = assert_section_visible(
             shot2,
             ["Это особый колонтитул для первой страницы", "Страница 1 из 4", "Страница 1 из4"],
             need=2,
         )
-        page1_token_ok, page1_token_found = assert_reference_document_page_content(shot2, 1)
-        page1_full_view_ok, page1_full_view_found = assert_reference_document_page_full_view(shot2, 1)
+        page1_token_result = assert_reference_document_page_content(shot2, 1)
+        page1_full_view_result = assert_reference_document_page_full_view(shot2, 1)
         zoom_expected = "Масштаб изменён, страница целиком помещается в рабочей области"
         page1_match_msg = "Содержание и форма первой страницы совпадают с эталоном"
+        zoom_controls_result = merge_results([zoom_label_result, zoom_status_result], mode="any")
+        page1_full_result_merged = merge_results([page1_full_result, page1_full_view_result], mode="any")
+        page1_total_result = merge_results(
+            [zoom_controls_result, page1_full_result_merged, page1_token_result],
+            mode="all",
+        )
         zoom_ok = (
             bool(zoom_trace.get("ok"))
-            and (zoom_label_ok or zoom_status_ok)
-            and (page1_full_ok or page1_full_view_ok)
-            and page1_token_ok
+            and bool(page1_total_result)
         )
 
         with StepVerifier(
@@ -227,17 +220,23 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot2)
-            _attach_action_trace(step, zoom_trace, "click_zoom_to_page")
+            apply_action_trace(
+                step,
+                zoom_trace,
+                "click_zoom_to_page",
+                primary_modes=("DOM_CDP", "KEYBOARD", "MOUSE_WHEEL"),
+            )
+            apply_verification_result(step, page1_total_result, context="page1_full_view")
             step.check(
                 condition=zoom_ok,
                 pass_msg=f"{zoom_expected}. {page1_match_msg}.",
                 fail_msg=(
                     "Не подтверждено отображение страницы 1 целиком после команды "
                     f"«По размеру страницы». Маркеры full-page: "
-                    f"{page1_full_found if page1_full_found else 'нет'}; "
+                    f"{page1_full_result.found_tokens if page1_full_result.found_tokens else 'нет'}; "
                     f"маркеры колонтитулов: "
-                    f"{page1_full_view_found if page1_full_view_found else 'нет'}; "
-                    f"маркеры страницы 1: {page1_token_found if page1_token_found else 'нет'}"
+                    f"{page1_full_view_result.found_tokens if page1_full_view_result.found_tokens else 'нет'}; "
+                    f"маркеры страницы 1: {page1_token_result.found_tokens if page1_token_result.found_tokens else 'нет'}"
                 ),
             )
 
@@ -250,7 +249,7 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        page2_state = {"ok": False, "found": [], "full_ok": False, "full_found": []}
+        page2_state = {"result": None, "found": [], "full_found": []}
 
         def _probe_page2() -> bool:
             capture_step(
@@ -260,18 +259,17 @@ def main():
                 activate_driver=driver,
                 pid=pid,
             )
-            ok, found = assert_reference_document_page_content(shot3, 2, capture=False)
-            full_ok, full_found = assert_reference_document_page_full_view(shot3, 2, capture=False)
-            page2_state["ok"] = ok
-            page2_state["found"] = found
-            page2_state["full_ok"] = full_ok
-            page2_state["full_found"] = full_found
-            return ok and full_ok
+            content_result = assert_reference_document_page_content(shot3, 2, capture=False)
+            full_result = assert_reference_document_page_full_view(shot3, 2, capture=False)
+            combined_result = merge_results([content_result, full_result], mode="all")
+            page2_state["result"] = combined_result
+            page2_state["found"] = content_result.found_tokens
+            page2_state["full_found"] = full_result.found_tokens
+            return bool(combined_result)
 
         page2_ok = (
             wait_until(_probe_page2, timeout_sec=8, poll_interval=1.0)
-            and page2_state["ok"]
-            and page2_state["full_ok"]
+            and bool(page2_state["result"])
         )
         page2_expected = "Отображается страница 2 эталонного документа целиком (верх и низ страницы видны)"
 
@@ -284,7 +282,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot3)
-            _attach_action_trace(step, page2_nav_trace, "go_to_next_page")
+            apply_action_trace(
+                step,
+                page2_nav_trace,
+                "go_to_next_page",
+                primary_modes=("DOM_CDP", "KEYBOARD", "MOUSE_WHEEL"),
+            )
+            apply_verification_result(step, page2_state["result"], context="page2_full_view")
             step.check(
                 condition=page2_ok,
                 pass_msg=page2_expected,
@@ -306,7 +310,7 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        page3_state = {"ok": False, "found": [], "full_ok": False, "full_found": []}
+        page3_state = {"result": None, "found": [], "full_found": []}
 
         def _probe_page3() -> bool:
             capture_step(
@@ -316,18 +320,17 @@ def main():
                 activate_driver=driver,
                 pid=pid,
             )
-            ok, found = assert_reference_document_page_content(shot4, 3, capture=False)
-            full_ok, full_found = assert_reference_document_page_full_view(shot4, 3, capture=False)
-            page3_state["ok"] = ok
-            page3_state["found"] = found
-            page3_state["full_ok"] = full_ok
-            page3_state["full_found"] = full_found
-            return ok and full_ok
+            content_result = assert_reference_document_page_content(shot4, 3, capture=False)
+            full_result = assert_reference_document_page_full_view(shot4, 3, capture=False)
+            combined_result = merge_results([content_result, full_result], mode="all")
+            page3_state["result"] = combined_result
+            page3_state["found"] = content_result.found_tokens
+            page3_state["full_found"] = full_result.found_tokens
+            return bool(combined_result)
 
         page3_ok = (
             wait_until(_probe_page3, timeout_sec=8, poll_interval=1.0)
-            and page3_state["ok"]
-            and page3_state["full_ok"]
+            and bool(page3_state["result"])
         )
         page3_expected = "Отображается страница 3 эталонного документа целиком (верх и низ страницы видны)"
 
@@ -340,7 +343,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot4)
-            _attach_action_trace(step, page3_nav_trace, "go_to_next_page")
+            apply_action_trace(
+                step,
+                page3_nav_trace,
+                "go_to_next_page",
+                primary_modes=("DOM_CDP", "KEYBOARD", "MOUSE_WHEEL"),
+            )
+            apply_verification_result(step, page3_state["result"], context="page3_full_view")
             step.check(
                 condition=page3_ok,
                 pass_msg=page3_expected,
@@ -362,7 +371,7 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        page4_state = {"ok": False, "found": [], "full_ok": False, "full_found": []}
+        page4_state = {"result": None, "found": [], "full_found": []}
 
         def _probe_page4() -> bool:
             capture_step(
@@ -372,18 +381,17 @@ def main():
                 activate_driver=driver,
                 pid=pid,
             )
-            ok, found = assert_reference_document_page_content(shot5, 4, capture=False)
-            full_ok, full_found = assert_reference_document_page_full_view(shot5, 4, capture=False)
-            page4_state["ok"] = ok
-            page4_state["found"] = found
-            page4_state["full_ok"] = full_ok
-            page4_state["full_found"] = full_found
-            return ok and full_ok
+            content_result = assert_reference_document_page_content(shot5, 4, capture=False)
+            full_result = assert_reference_document_page_full_view(shot5, 4, capture=False)
+            combined_result = merge_results([content_result, full_result], mode="all")
+            page4_state["result"] = combined_result
+            page4_state["found"] = content_result.found_tokens
+            page4_state["full_found"] = full_result.found_tokens
+            return bool(combined_result)
 
         page4_ok = (
             wait_until(_probe_page4, timeout_sec=8, poll_interval=1.0)
-            and page4_state["ok"]
-            and page4_state["full_ok"]
+            and bool(page4_state["result"])
         )
         page4_expected = "Отображается страница 4 эталонного документа целиком (верх и низ страницы видны)"
 
@@ -396,7 +404,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot5)
-            _attach_action_trace(step, page4_nav_trace, "go_to_next_page")
+            apply_action_trace(
+                step,
+                page4_nav_trace,
+                "go_to_next_page",
+                primary_modes=("DOM_CDP", "KEYBOARD", "MOUSE_WHEEL"),
+            )
+            apply_verification_result(step, page4_state["result"], context="page4_full_view")
             step.check(
                 condition=page4_ok,
                 pass_msg=page4_expected,

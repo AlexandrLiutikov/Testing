@@ -18,7 +18,14 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from shared.infra import CaseRunner, StepVerifier, capture_step
+from shared.infra import (
+    CaseRunner,
+    StepVerifier,
+    apply_action_trace,
+    apply_verification_result,
+    capture_step,
+    merge_results,
+)
 from shared.infra.waits import wait_main_proc, wait_until
 from shared.drivers import get_driver
 
@@ -45,32 +52,6 @@ CASE_META = {
     "risk_level": "HIGH",
     "critical_path": True,
 }
-
-
-def _attach_action_trace(step, trace: dict, action_name: str):
-    if not trace:
-        return
-
-    if trace.get("fallback_used"):
-        step.set_fallback(
-            trace.get("fallback_source", ""),
-            trace.get("fallback_reason", ""),
-        )
-
-    mode = str(trace.get("mode", "")).strip()
-    if mode and mode not in ("DOM_CDP", "DOM_FOCUS", "UIA"):
-        step.add_warning(
-            code=f"{action_name.upper()}_MODE",
-            severity="LOW",
-            message=f"Action выполнился в режиме {mode}, а не в DOM/UIA primary.",
-        )
-
-    for w in trace.get("warnings", []) or []:
-        step.add_warning(
-            code=w.get("code", "ACTION_WARNING"),
-            severity=w.get("severity", "LOW"),
-            message=w.get("message", ""),
-        )
 
 
 def _candidate_save_paths() -> list:
@@ -135,11 +116,12 @@ def main():
             activate_driver=driver,
             pid=pid,
         )
-        pre_ok, _ = assert_section_visible(
+        pre_result = assert_section_visible(
             pre_shot,
             SMOKE_TEXT_ASSERT_TOKENS,
             need=2,
         )
+        pre_ok = bool(pre_result)
         if not pre_ok:
             runner.add_step(
                 step_num=0,
@@ -160,11 +142,13 @@ def main():
         shot1 = capture_step(runner.run_dir, 1, "undo", activate_driver=driver, pid=pid)
 
         last_ok = False
+        last_undo_result = None
 
         def _probe_undo() -> bool:
-            nonlocal last_ok
+            nonlocal last_ok, last_undo_result
             driver.activate_window(pid)
-            last_ok, _ = assert_text_absent(shot1, SMOKE_TEXT_ASSERT_TOKENS, max_found=0)
+            last_undo_result = assert_text_absent(shot1, SMOKE_TEXT_ASSERT_TOKENS, max_found=0)
+            last_ok = bool(last_undo_result)
             return last_ok
 
         undo_ok = False
@@ -189,7 +173,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot1)
-            _attach_action_trace(step, undo_trace, "undo_last_action")
+            apply_action_trace(
+                step,
+                undo_trace,
+                "undo_last_action",
+                primary_modes=("DOM_CDP", "DOM_FOCUS", "UIA"),
+            )
+            apply_verification_result(step, last_undo_result, context="undo_text_absent")
             step.check(
                 condition=undo_ok,
                 pass_msg="Команда «Отменить» выполнена, текст на странице отсутствует",
@@ -203,11 +193,13 @@ def main():
         redo_clicked = False
         redo_trace = {}
         shot2 = capture_step(runner.run_dir, 2, "redo", activate_driver=driver, pid=pid)
+        last_redo_result = None
 
         def _probe_redo() -> bool:
-            nonlocal last_ok
+            nonlocal last_ok, last_redo_result
             driver.activate_window(pid)
-            last_ok, _ = assert_section_visible(shot2, SMOKE_TEXT_ASSERT_TOKENS, need=2)
+            last_redo_result = assert_section_visible(shot2, SMOKE_TEXT_ASSERT_TOKENS, need=2)
+            last_ok = bool(last_redo_result)
             return last_ok
 
         redo_ok = False
@@ -230,7 +222,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot2)
-            _attach_action_trace(step, redo_trace, "redo_last_action")
+            apply_action_trace(
+                step,
+                redo_trace,
+                "redo_last_action",
+                primary_modes=("DOM_CDP", "DOM_FOCUS", "UIA"),
+            )
+            apply_verification_result(step, last_redo_result, context="redo_text_present")
             step.check(
                 condition=redo_ok,
                 pass_msg="Команда «Повторить» выполнена, текст снова отображается",
@@ -250,10 +248,12 @@ def main():
             pid=pid,
         )
 
+        last_save_dialog_result = None
         def _probe_save_dialog() -> bool:
-            nonlocal last_ok
+            nonlocal last_ok, last_save_dialog_result
             driver.activate_window(pid)
-            last_ok, _ = assert_save_dialog_opened(shot3)
+            last_save_dialog_result = assert_save_dialog_opened(shot3)
+            last_ok = bool(last_save_dialog_result)
             return last_ok
 
         save_dialog_ok = (
@@ -276,7 +276,13 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot3)
-            _attach_action_trace(step, save_trace, "save_active_document")
+            apply_action_trace(
+                step,
+                save_trace,
+                "save_active_document",
+                primary_modes=("DOM_CDP", "DOM_FOCUS", "UIA"),
+            )
+            apply_verification_result(step, last_save_dialog_result, context="save_dialog_open")
             step.check(
                 condition=save_dialog_ok,
                 pass_msg="Открыто системное окно сохранения, имя документа по умолчанию отображается",
@@ -296,10 +302,12 @@ def main():
             pid=pid,
         )
 
+        last_dialog_state_result = None
         def _probe_dialog_closed() -> bool:
-            nonlocal last_ok
+            nonlocal last_ok, last_dialog_state_result
             driver.activate_window(pid)
-            still_open, _ = assert_save_dialog_opened(shot4)
+            last_dialog_state_result = assert_save_dialog_opened(shot4)
+            still_open = bool(last_dialog_state_result)
             last_ok = not still_open
             return last_ok
 
@@ -318,6 +326,8 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot4)
+            apply_verification_result(step, last_dialog_state_result, context="save_dialog_state")
+            step.add_signal_note("save_dialog_state.inverted=true")
             step.check(
                 condition=dialog_closed_ok,
                 pass_msg="Системное окно сохранения закрыто после Enter",
@@ -328,10 +338,14 @@ def main():
         candidates = _candidate_save_paths()
         saved_path = {"value": ""}
         recursive_search_used = {"value": False}
+        last_file_result = None
 
         def _probe_file_exists() -> bool:
+            nonlocal last_file_result
             for path in candidates:
-                if assert_file_exists(path):
+                probe = assert_file_exists(path)
+                if probe:
+                    last_file_result = probe
                     saved_path["value"] = path
                     return True
             # fallback: быстрый поиск по профилю пользователя
@@ -341,6 +355,7 @@ def main():
                     for found in home.rglob(pattern):
                         recursive_search_used["value"] = True
                         saved_path["value"] = str(found)
+                        last_file_result = assert_file_exists(saved_path["value"])
                         return True
                 except OSError:
                     continue
@@ -364,6 +379,7 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot5)
+            apply_verification_result(step, last_file_result, context="saved_file_exists")
             if recursive_search_used["value"]:
                 step.set_fallback(
                     "FILESYSTEM_RECURSIVE_SEARCH",
@@ -432,7 +448,25 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(shot6)
-            _attach_action_trace(step, close_trace, "close_active_document_tab")
+            apply_action_trace(
+                step,
+                close_trace,
+                "close_active_document_tab",
+                primary_modes=("DOM_CDP", "DOM_FOCUS", "UIA"),
+            )
+            home_probe = assert_section_visible(
+                shot6,
+                ["Главная", "Последние", "файлы", "Документ", "Таблица", "Презентация"],
+                need=3,
+            )
+            recent_name = Path(saved_path["value"]).name if saved_path["value"] else "Документ1.docx"
+            recent_probe = assert_section_visible(
+                shot6,
+                [recent_name, "Документ1.docx", "Document1.docx"],
+                need=1,
+            )
+            post_probe = merge_results([home_probe, recent_probe], mode="all")
+            apply_verification_result(step, post_probe, context="postcondition_home_recent")
             step.check(
                 condition=post_ok,
                 pass_msg=(

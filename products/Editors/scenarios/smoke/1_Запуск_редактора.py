@@ -24,7 +24,12 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 sys.path.insert(0, _PROJECT_ROOT)
 
 # === Reusable инфраструктура ===
-from shared.infra import CaseRunner, StepVerifier, capture_step
+from shared.infra import (
+    CaseRunner,
+    StepVerifier,
+    apply_verification_result,
+    capture_step,
+)
 from shared.lifecycle import app_lifecycle
 
 # === Продуктовый слой ===
@@ -133,7 +138,7 @@ def main():
         s2_path = capture_step(runner.run_dir, 2, "warning_visible",
                                activate_driver=driver, pid=pid)
 
-        warn_found = assert_warning_visible(pid, timeout_sec=10)
+        warn_result = assert_warning_visible(pid, timeout_sec=10)
 
         with StepVerifier(
             runner, step_num=2,
@@ -143,8 +148,9 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(s2_path)
+            apply_verification_result(step, warn_result, context="warning_visible")
             step.check(
-                condition=warn_found,
+                condition=bool(warn_result),
                 pass_msg="Предупреждение о регистрации отображается",
                 fail_msg="Предупреждение о регистрации не появилось",
             )
@@ -158,7 +164,7 @@ def main():
                                activate_driver=driver, pid=pid)
 
         pid_after = wait_main_proc("editors", 10)
-        warning_closed = assert_warning_closed(pid_after, timeout_sec=3)
+        warning_closed_result = assert_warning_closed(pid_after, timeout_sec=3)
 
         with StepVerifier(
             runner, step_num=3,
@@ -168,8 +174,9 @@ def main():
             failure_area="CORE_FUNCTION",
         ) as step:
             step.screenshot(s3_path)
+            apply_verification_result(step, warning_closed_result, context="warning_closed")
             step.check(
-                condition=(pid_after is not None and warning_closed),
+                condition=(pid_after is not None and bool(warning_closed_result)),
                 pass_msg="Предупреждение закрыто, главное окно редактора отображается",
                 fail_msg="Не удалось закрыть предупреждение о регистрации",
             )

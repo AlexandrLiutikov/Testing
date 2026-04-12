@@ -7,6 +7,8 @@ from shared.infra.step_helpers import (
     screenshot_path,
     capture_step,
     StepVerifier,
+    apply_action_trace,
+    apply_verification_result,
 )
 from shared.infra.test_runner import CaseRunner
 from shared.infra.verification import VerificationResult, build_result, merge_results
@@ -37,6 +39,8 @@ __all__ = [
     "screenshot_path",
     "capture_step",
     "StepVerifier",
+    "apply_action_trace",
+    "apply_verification_result",
     "CaseRunner",
     "VerificationResult",
     "build_result",
