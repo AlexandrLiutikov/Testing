@@ -33,7 +33,10 @@ from shared.infra.visual_features import (
 )
 from shared.infra.waits import wait_main_proc
 
-from products.Editors.actions.editor_actions import detect_warning_window
+from products.Editors.actions.editor_actions import (
+    detect_warning_window,
+    is_start_panel_visible_dom,
+)
 
 _REFERENCE_DOC_MODEL = load_yaml_model("products/Editors/models/docs/reference_docx.yaml")
 _EDITORS_RISK_MODEL_PATH = "products/Editors/RISK_MODEL.md"
@@ -638,6 +641,17 @@ def assert_section_visible(
         expected_tokens=tokens,
         need=need,
         evidence={"screenshot_path": screenshot_path},
+    )
+
+
+def assert_start_panel_visible_dom(panel_key: str) -> VerificationResult:
+    """Проверить через DOM/CDP, что нужная панель стартового окна активна."""
+    ok = is_start_panel_visible_dom(panel_key)
+    return build_result(
+        ok=ok,
+        sources_used=["dom_cdp"],
+        signal_strength=1.0 if ok else 0.0,
+        evidence={"panel_key": panel_key},
     )
 
 

@@ -5,7 +5,7 @@ body {
   margin: 24px;
   color: #1f2328;
   background: #f7f9fc;
-  overflow-x: hidden;
+  overflow-x: auto;
 }
 
 h1 {
@@ -141,6 +141,7 @@ h1 {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -153,6 +154,10 @@ table {
   table-layout: auto;
 }
 
+.steps-table {
+  min-width: 1280px;
+}
+
 th, td {
   border: 1px solid #d0d7de;
   padding: 10px;
@@ -161,6 +166,13 @@ th, td {
   overflow-wrap: break-word;
   word-break: normal;
   hyphens: auto;
+}
+
+.steps-table th {
+  white-space: nowrap;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  hyphens: none;
 }
 
 .steps-table th:first-child,
@@ -190,6 +202,23 @@ th, td {
   word-break: break-word;
 }
 
+.steps-table th:nth-child(5),
+.steps-table td:nth-child(5) {
+  min-width: 150px;
+}
+
+.steps-table th:nth-child(6),
+.steps-table td:nth-child(6) {
+  min-width: 260px;
+}
+
+.steps-table th:nth-child(7),
+.steps-table td:nth-child(7),
+.steps-table th:nth-child(8),
+.steps-table td:nth-child(8) {
+  min-width: 220px;
+}
+
 th {
   background: #f0f4f8;
 }
@@ -209,6 +238,24 @@ th {
   max-width: 280px;
   border: 1px solid #ddd;
   border-radius: 6px;
+}
+
+@media (max-width: 1366px) {
+  body {
+    margin: 12px;
+  }
+
+  .steps-table {
+    min-width: 1080px;
+  }
+
+  th, td {
+    padding: 8px;
+  }
+
+  .screenshot-thumb {
+    max-width: 200px;
+  }
 }
 
 /* --- Footer --- */

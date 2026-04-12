@@ -91,6 +91,13 @@
   </div>
 
   <div class='decision-section'>
+    <strong>Signal risks:</strong>
+    <ul>
+      <li>Critical-path шаги со слабым сигналом подтверждения (WEAK)</li>
+    </ul>
+  </div>
+
+  <div class='decision-section'>
     <strong>Рекомендации:</strong>
     <ul>
       <li>Разрешить релиз</li>
@@ -145,15 +152,17 @@
 3. `Статус`
 4. `Severity` (новая колонка — заполняется только для FAIL)
 5. `Warnings/Fallback`
-6. `Ожидание`
-7. `Факт`
-8. `Скриншот`
+6. `Сигналы`
+7. `Ожидание`
+8. `Факт`
+9. `Скриншот`
 
 Каждая строка = один проверяемый шаг кейса.
 
 Для строк с FAIL в колонке Severity указывать уровень: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`.
 Для строк с PASS колонка Severity остаётся пустой.
-В `Warnings/Fallback` выводятся предупреждения шага и факт fallback (`fallback_source`, `fallback_reason`).
+В `Warnings/Fallback` выводятся только предупреждения шага и факт fallback (`fallback_source`, `fallback_reason`).
+В колонке `Сигналы` выводятся `signal_strength`, `verification_sources` и `signal_notes` для диагностики и понимания качества проверки.
 
 ## 6. Статусы и цвета
 - PASS: класс `.pass`, зеленый `#1a7f37`
