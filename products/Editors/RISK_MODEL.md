@@ -302,3 +302,26 @@ severity_if_fail: HIGH
 2. при неуспехе — `standard` (без debug-флага).
 - Если debug-порт недоступен, тест не должен падать сразу: сохраняется fallback-цепочка действий.
 - Если оба launch-режима неуспешны, это инфраструктурный риск (`INFRA_FAIL`/`BLOCKED`) с обязательной фиксацией в отчёте.
+
+---
+
+## 9. Target model alignment для Editors
+
+Для Editors целевая модель верификации фиксируется в
+`docs/methodology/TARGET_MODEL_GLOSSARY.md` и применяется совместно с этим
+`RISK_MODEL.md`.
+
+Обязательные правила применения:
+
+- `risk-based decisioning` всегда опирается на критические пути и допуски текущего
+  документа; glossary не переопределяет риск-политику, а стандартизирует термины.
+- Для critical path проверки должны подтверждаться approved verification sources из
+  glossary с приоритетом semantic/assertion и file-model сигналов.
+- `geometry-aware` признаки трактуются только в рамках tolerance этой модели
+  (например, `ui_shift <= 5px` допустим при сохраненной функциональности).
+- Любой fallback отражается как риск достоверности сигнала и влияет на
+  `run_confidence` через `DECISION_ENGINE.md`.
+
+Definition of Done для миграции:
+- применяется из `TARGET_MODEL_GLOSSARY.md`, раздел 3;
+- миграция не считается завершенной, если хотя бы один пункт DoD не выполнен.
