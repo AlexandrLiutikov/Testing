@@ -35,6 +35,11 @@ def normalize_ui_label(text: str) -> str:
     raw = str(text or "").strip().lower().replace("ё", "е")
     raw = re.sub(r"\s+", "", raw)
     raw = re.sub(r"[^a-zа-я0-9]", "", raw)
+    # OCR иногда отдаёт устойчивые орфографические искажения слитных слов.
+    aliases = {
+        "распознованиетекста": "распознаваниетекста",
+    }
+    raw = aliases.get(raw, raw)
     return raw
 
 
