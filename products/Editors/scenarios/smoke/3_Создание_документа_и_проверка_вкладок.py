@@ -41,7 +41,7 @@ from products.Editors.assertions.editor_assertions import (
 from products.Editors.assertions.ui_catalog import (
     TOOLBAR_TABS,
     diff_ui_items,
-    toolbar_tab_names,
+    toolbar_tab_warning_expected_names,
 )
 
 
@@ -118,7 +118,7 @@ def _toolbar_drift_warnings():
     if not observed:
         return []
 
-    drift = diff_ui_items(observed, toolbar_tab_names())
+    drift = diff_ui_items(observed, toolbar_tab_warning_expected_names())
     out = []
     for item in drift.get("extra", [])[:6]:
         out.append({

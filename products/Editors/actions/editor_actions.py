@@ -650,11 +650,32 @@ def list_toolbar_tabs_dom() -> list:
     const r = el.getBoundingClientRect();
     return r.width > 6 && r.height > 6 && r.top < 220;
   };
-  const items = Array.from(doc.querySelectorAll('a,button,div,span,[role="tab"]'))
-    .filter(isVisible)
-    .map(el => (el.textContent || '').trim())
+  const normalize = (raw) => (raw || '')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  // Основной путь: забираем только реальные tab-элементы верхней ленты.
+  const tabNodes = Array.from(
+    doc.querySelectorAll(
+      '.tabs li.ribtab > a[data-tab], li.ribtab > a[data-tab], [role="tab"][data-tab], [data-tab][data-title]'
+    )
+  ).filter(isVisible);
+
+  let items = tabNodes
+    .map(el => normalize(el.getAttribute('data-title') || el.textContent || ''))
     .filter(Boolean);
-  const uniq = Array.from(new Set(items)).slice(0, 120);
+
+  // Fallback для сборок/тем, где структура табов отличается.
+  if (!items.length) {
+    items = Array.from(doc.querySelectorAll('a,button,div,span,[role="tab"]'))
+      .filter(isVisible)
+      .map(el => normalize(el.textContent || ''))
+      .filter(Boolean);
+  }
+
+  const uniq = Array.from(new Set(items))
+    .filter(label => label.length <= 40)
+    .slice(0, 40);
   return {ok:true, items: uniq};
 """
     )

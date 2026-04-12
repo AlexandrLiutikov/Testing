@@ -12,6 +12,7 @@ START_SCREEN_SECTIONS = dict(_UI_MODEL.get("start_screen", {}).get("sections", {
 # - required: признаки, отсутствие которых приводит к FAIL
 # - optional: признаки, изменения которых фиксируются как warning
 TOOLBAR_TABS = list(_UI_MODEL.get("toolbar_tabs", []))
+TOOLBAR_TABS_WARNING_EXPECTED = list(_UI_MODEL.get("toolbar_tabs_warning_expected", []))
 
 UI_CATALOG_TOLERANCES = dict(_UI_MODEL.get("tolerances", {}))
 
@@ -27,6 +28,23 @@ def diff_ui_items(observed: list, expected: list) -> dict:
 
 def toolbar_tab_names() -> list:
     return [item["name"] for item in TOOLBAR_TABS]
+
+
+def toolbar_tab_warning_expected_names() -> list:
+    """Список вкладок для drift-предупреждений UI_NEW_ELEMENT."""
+    if TOOLBAR_TABS_WARNING_EXPECTED:
+        return [str(name).strip() for name in TOOLBAR_TABS_WARNING_EXPECTED if str(name).strip()]
+
+    # Fallback для старых моделей: ожидаем smoke-вкладки + базовую «Главная».
+    out = []
+    seen = set()
+    for name in ["Главная", *toolbar_tab_names()]:
+        key = str(name).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
 
 
 def start_screen_section(section_key: str) -> dict:
