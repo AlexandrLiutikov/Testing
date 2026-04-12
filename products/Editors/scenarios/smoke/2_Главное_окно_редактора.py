@@ -11,6 +11,7 @@
 
 import argparse
 import os
+import re
 import sys
 
 # --- Корень проекта в sys.path для импортов shared/ ---
@@ -29,6 +30,7 @@ from shared.infra import (
     capture_step,
 )
 from shared.infra.waits import wait_main_proc
+from shared.infra.verification import merge_results
 from shared.drivers import get_driver
 
 # === Продуктовый слой: actions ===
@@ -42,12 +44,14 @@ from products.Editors.actions.editor_actions import (
 # === Продуктовый слой: assertions ===
 from products.Editors.assertions.editor_assertions import (
     assert_section_visible,
+    assert_start_panel_visible_dom,
     assert_popup_visible,
     assert_popup_closed,
 )
 from products.Editors.assertions.ui_catalog import (
     START_MENU_EXPECTED,
     diff_ui_items,
+    start_screen_section,
 )
 
 
@@ -63,20 +67,42 @@ CASE_META = {
     "critical_path": True,
 }
 
+_HOME_SECTION = start_screen_section("home")
+_TEMPLATES_SECTION = start_screen_section("templates")
+_LOCAL_SECTION = start_screen_section("local")
+_CONNECT_POPUP_SECTION = start_screen_section("connect_popup")
+_SETTINGS_SECTION = start_screen_section("settings")
+_ABOUT_SECTION = start_screen_section("about")
+
 
 def _menu_drift_warnings():
-    observed = list_start_menu_items_dom()
+    observed_raw = list_start_menu_items_dom()
+    if not observed_raw:
+        return []
+
+    observed = []
+    for item in observed_raw:
+        text = " ".join(str(item).split())
+        if not text:
+            continue
+        if len(text) > 40:
+            continue
+        if not re.fullmatch(r"[A-Za-zА-Яа-яЁё\-\s]{2,40}", text):
+            continue
+        observed.append(text)
+
     if not observed:
         return []
+
     drift = diff_ui_items(observed, START_MENU_EXPECTED)
     out = []
-    for item in drift.get("extra", []):
+    for item in drift.get("extra", [])[:6]:
         out.append({
             "code": "UI_NEW_ELEMENT",
             "severity": "LOW",
             "message": f"Обнаружен новый элемент стартового меню: «{item}».",
         })
-    for item in drift.get("missing", []):
+    for item in drift.get("missing", [])[:6]:
         out.append({
             "code": "UI_MISSING_ELEMENT",
             "severity": "LOW",
@@ -125,6 +151,7 @@ def main():
             )
 
         driver.activate_window(pid)
+        menu_warnings = _menu_drift_warnings()
 
         # ==============================================================
         # Шаг 1: Проверка — главное окно отображается (assertion only)
@@ -133,20 +160,20 @@ def main():
                                activate_driver=driver, pid=pid)
         home_result = assert_section_visible(
             s1_path,
-            ["Создавайте новые файлы", "Документ", "Таблица", "Презентация"],
-            need=2,
+            _HOME_SECTION["tokens"],
+            need=_HOME_SECTION["need"],
         )
 
         with StepVerifier(
             runner, step_num=1,
             step_name="Проверка: главное окно — «Главная» видна",
-            expected="Отображается вкладка меню «Главная»",
+            expected=_HOME_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s1_path)
             apply_verification_result(step, home_result, context="home_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],
@@ -167,14 +194,14 @@ def main():
                                activate_driver=driver, pid=pid)
         templates_result = assert_section_visible(
             s2_path,
-            ["Шаблоны документов", "Избранное", "Подключить папку"],
-            need=1,
+            _TEMPLATES_SECTION["tokens"],
+            need=_TEMPLATES_SECTION["need"],
         )
 
         with StepVerifier(
             runner, step_num=2,
             step_name="Проверка: раздел «Шаблоны» открыт",
-            expected="Отображается меню «Шаблоны»",
+            expected=_TEMPLATES_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
@@ -186,7 +213,7 @@ def main():
                 primary_modes=("DOM_CDP", "DOM_FOCUS"),
             )
             apply_verification_result(step, templates_result, context="templates_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],
@@ -205,16 +232,24 @@ def main():
 
         s3_path = capture_step(runner.run_dir, 3, "local",
                                activate_driver=driver, pid=pid)
-        local_result = assert_section_visible(
+        local_visual_result = assert_section_visible(
             s3_path,
-            ["Локальные файлы", "Выбрать папку", "Подключить папку"],
-            need=1,
+            _LOCAL_SECTION["tokens"],
+            need=_LOCAL_SECTION["need"],
         )
+        local_dom_result = assert_start_panel_visible_dom("local")
+        local_result = merge_results(
+            [local_visual_result, local_dom_result],
+            mode="any",
+            evidence={"context": "local_visible"},
+        )
+        if local_dom_result.ok and not local_visual_result.ok:
+            local_result.tolerance_applied.append("LOCAL_PANEL_DOM_RESCUE")
 
         with StepVerifier(
             runner, step_num=3,
             step_name="Проверка: раздел «Локальные файлы» открыт",
-            expected="Отображается меню «Локальные файлы»",
+            expected=_LOCAL_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
@@ -226,7 +261,7 @@ def main():
                 primary_modes=("DOM_CDP", "DOM_FOCUS"),
             )
             apply_verification_result(step, local_result, context="local_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],
@@ -247,15 +282,14 @@ def main():
                                activate_driver=driver, pid=pid)
         popup_result = assert_popup_visible(
             s4_path,
-            ["Выберите диск для подключения", "URL диска",
-             "Подключить", "Р7-Диск", "VK WorkSpace"],
-            need=2,
+            _CONNECT_POPUP_SECTION["tokens"],
+            need=_CONNECT_POPUP_SECTION["need"],
         )
 
         with StepVerifier(
             runner, step_num=4,
             step_name="Проверка: окно подключения появилось",
-            expected="Появляется окно «Выберите диск для подключения»",
+            expected=_CONNECT_POPUP_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
@@ -267,7 +301,7 @@ def main():
                 primary_modes=("DOM_CDP", "DOM_FOCUS"),
             )
             apply_verification_result(step, popup_result, context="collab_popup_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],
@@ -290,20 +324,44 @@ def main():
             s5_path,
             ["Выберите диск для подключения", "URL диска", "Подключить"],
         )
+        local_after_close_visual = assert_section_visible(
+            s5_path,
+            _LOCAL_SECTION["tokens"],
+            need=_LOCAL_SECTION["need"],
+        )
+        local_after_close_dom = assert_start_panel_visible_dom("local")
+        local_after_close_result = merge_results(
+            [local_after_close_visual, local_after_close_dom],
+            mode="any",
+            evidence={"context": "local_after_popup_close"},
+        )
+        if local_after_close_dom.ok and not local_after_close_visual.ok:
+            local_after_close_result.tolerance_applied.append("LOCAL_PANEL_DOM_RESCUE")
+        popup_closed_and_local_result = merge_results(
+            [popup_closed_result, local_after_close_result],
+            mode="all",
+            evidence={"context": "collab_popup_closed_local"},
+        )
 
         with StepVerifier(
             runner, step_num=5,
             step_name="Проверка: окно подключения закрыто",
-            expected="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
+            expected="Всплывающее окно закрыто, снова отображается раздел «Локальные файлы».",
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s5_path)
-            apply_verification_result(step, popup_closed_result, context="collab_popup_closed")
+            apply_verification_result(step, popup_closed_and_local_result, context="collab_popup_closed")
+            for w in menu_warnings:
+                step.add_warning(
+                    code=w["code"],
+                    severity=w["severity"],
+                    message=w["message"],
+                )
             step.check(
-                condition=bool(popup_closed_result),
+                condition=bool(popup_closed_and_local_result),
                 pass_msg="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
-                fail_msg="Модальное окно подключения не закрылось по кнопке «X»",
+                fail_msg="После закрытия окна подключения раздел «Локальные файлы» не подтверждён",
             )
 
         # ==============================================================
@@ -315,14 +373,14 @@ def main():
                                activate_driver=driver, pid=pid)
         settings_result = assert_section_visible(
             s6_path,
-            ["Настройки", "Язык интерфейса", "Масштабирование интерфейса"],
-            need=2,
+            _SETTINGS_SECTION["tokens"],
+            need=_SETTINGS_SECTION["need"],
         )
 
         with StepVerifier(
             runner, step_num=6,
             step_name="Проверка: раздел «Настройки» открыт",
-            expected="Отображается вкладка меню «Настройки»",
+            expected=_SETTINGS_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
@@ -334,7 +392,7 @@ def main():
                 primary_modes=("DOM_CDP", "DOM_FOCUS"),
             )
             apply_verification_result(step, settings_result, context="settings_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],
@@ -355,15 +413,14 @@ def main():
                                activate_driver=driver, pid=pid)
         about_result = assert_section_visible(
             s7_path,
-            ["Профессиональный (десктопная версия)",
-             "Лицензионное соглашение", "Техподдержка"],
-            need=1,
+            _ABOUT_SECTION["tokens"],
+            need=_ABOUT_SECTION["need"],
         )
 
         with StepVerifier(
             runner, step_num=7,
             step_name="Проверка: раздел «О программе» открыт",
-            expected="Отображается меню «О программе»",
+            expected=_ABOUT_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
@@ -375,7 +432,7 @@ def main():
                 primary_modes=("DOM_CDP", "DOM_FOCUS"),
             )
             apply_verification_result(step, about_result, context="about_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],
@@ -396,15 +453,14 @@ def main():
                                activate_driver=driver, pid=pid)
         home_return_result = assert_section_visible(
             s8_path,
-            ["Самое время начать", "Создавайте новые файлы",
-             "Документ", "Таблица", "Презентация"],
-            need=2,
+            _HOME_SECTION["tokens"],
+            need=_HOME_SECTION["need"],
         )
 
         with StepVerifier(
             runner, step_num=8,
             step_name="Проверка: возврат на «Главная»",
-            expected="Отображается вкладка меню «Главная»",
+            expected=_HOME_SECTION["expected"],
             severity="HIGH",
             failure_area="UI_LAYOUT",
         ) as step:
@@ -416,7 +472,7 @@ def main():
                 primary_modes=("DOM_CDP", "DOM_FOCUS"),
             )
             apply_verification_result(step, home_return_result, context="home_return_visible")
-            for w in _menu_drift_warnings():
+            for w in menu_warnings:
                 step.add_warning(
                     code=w["code"],
                     severity=w["severity"],

@@ -62,6 +62,14 @@ _START_MENU_LABELS = {
     "about": ["О программе", "О приложении", "About"],
 }
 
+_START_SCREEN_PANEL_CLASS = {
+    "templates": "localtemplates",
+    "local": "open",
+    "connect": "connect",
+    "settings": "settings",
+    "about": "about",
+}
+
 
 def click_menu(pid: int, menu_key: str):
     """Активировать окно и кликнуть по пункту левого меню стартового экрана.
@@ -488,14 +496,23 @@ def list_start_menu_items_dom() -> list:
     const style = window.getComputedStyle(el);
     if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
     const r = el.getBoundingClientRect();
-    return r.width > 4 && r.height > 4;
+    return r.width > 2 && r.height > 2;
   };
-  const left = Array.from(document.querySelectorAll('a,button,div,span'))
-    .filter(isVisible)
-    .filter(el => el.getBoundingClientRect().left < window.innerWidth * 0.38)
-    .map(el => (el.textContent || '').trim())
-    .filter(Boolean);
-  const uniq = Array.from(new Set(left)).slice(0, 80);
+
+  const normalize = (raw) => (raw || '')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  const nodes = Array.from(document.querySelectorAll('li.menu-item'))
+    .map(li => {
+      const actionNode = li.querySelector('a.side-menu-link[action], button[action]');
+      if (!actionNode || !isVisible(actionNode)) return '';
+      return normalize(actionNode.textContent || '');
+    })
+    .filter(Boolean)
+    .filter(label => label.length <= 40);
+
+  const uniq = Array.from(new Set(nodes));
   return {ok:true, items: uniq};
 """
     )
@@ -504,6 +521,37 @@ def list_start_menu_items_dom() -> list:
         if isinstance(items, list):
             return [str(x).strip() for x in items if str(x).strip()]
     return []
+
+
+def is_start_panel_visible_dom(panel_key: str) -> bool:
+    """Проверить, что action-panel стартового окна видим через DOM/CDP.
+
+    Args:
+        panel_key: логическое имя панели (local/templates/connect/settings/about)
+                   или прямое имя CSS-класса action-panel.
+    """
+    panel_class = _START_SCREEN_PANEL_CLASS.get(panel_key, str(panel_key or "").strip())
+    if not panel_class:
+        return False
+
+    result = _cdp_eval_root(
+        f"""
+  const panelClass = {json.dumps(panel_class)};
+  const panel = document.querySelector(`.action-panel.${{panelClass}}`);
+  if (!panel) return {{ok:false, reason:'panel_not_found', panelClass}};
+
+  const style = window.getComputedStyle(panel);
+  if (!style || style.display === 'none' || style.visibility === 'hidden') {{
+    return {{ok:false, reason:'panel_hidden', panelClass}};
+  }}
+  const rect = panel.getBoundingClientRect();
+  if (rect.width <= 2 || rect.height <= 2) {{
+    return {{ok:false, reason:'panel_zero_rect', panelClass}};
+  }}
+  return {{ok:true, panelClass}};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
 
 
 def _cdp_click_selector_in_editor_frame(selector: str) -> bool:

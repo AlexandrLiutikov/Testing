@@ -33,6 +33,11 @@ def _warnings_text(step: dict) -> str:
             fb += f" ({fallback_reason})"
         chunks.append(fb)
 
+    return " | ".join(chunks)
+
+
+def _signals_text(step: dict) -> str:
+    chunks = []
     sources = step.get("verification_sources", []) or []
     signal_strength = step.get("signal_strength")
     signal_notes = step.get("signal_notes", []) or []
@@ -71,6 +76,7 @@ def _steps_html_rows(steps: list) -> str:
                 f"</a>"
             )
         wf_cell = _warnings_text(s)
+        signal_cell = _signals_text(s)
         rows.append(
             f"      <tr>\n"
             f"        <td>{s['step']}</td>\n"
@@ -78,6 +84,7 @@ def _steps_html_rows(steps: list) -> str:
             f"        <td class='{cls}'>{s['status']}</td>\n"
             f"        <td>{sev_cell}</td>\n"
             f"        <td>{wf_cell}</td>\n"
+            f"        <td>{signal_cell}</td>\n"
             f"        <td>{s['expected']}</td>\n"
             f"        <td>{s['actual']}</td>\n"
             f"        <td>{screenshot_cell}</td>\n"
@@ -96,6 +103,9 @@ def _decision_html(decision: dict) -> str:
     )
     risks_li = "\n".join(
         f"      <li>{r}</li>" for r in decision.get("risks", [])
+    )
+    signal_risks_li = "\n".join(
+        f"      <li>{r}</li>" for r in decision.get("signal_risks", [])
     )
     recs_li = "\n".join(
         f"      <li>{r}</li>" for r in decision.get("recommendations", [])
@@ -125,6 +135,12 @@ def _decision_html(decision: dict) -> str:
       <strong>Риски:</strong>
       <ul>
 {risks_li}
+      </ul>
+    </div>
+    <div class='decision-section'>
+      <strong>Signal risks:</strong>
+      <ul>
+{signal_risks_li}
       </ul>
     </div>
     <div class='decision-section'>
@@ -209,6 +225,7 @@ def generate_html(
         <th>Статус</th>
         <th>Severity</th>
         <th>Warnings/Fallback</th>
+        <th>Сигналы</th>
         <th>Ожидание</th>
         <th>Факт</th>
         <th>Скриншот</th>
@@ -269,15 +286,16 @@ def generate_md(
 
     lines.append("## Результаты шагов\n")
     lines.append(
-        "| Step | Шаг | Статус | Severity | Warnings/Fallback | Ожидание | Факт | Скриншот |"
+        "| Step | Шаг | Статус | Severity | Warnings/Fallback | Сигналы | Ожидание | Факт | Скриншот |"
     )
-    lines.append("|------|-----|--------|----------|-------------------|----------|------|----------|")
+    lines.append("|------|-----|--------|----------|-------------------|---------|----------|------|----------|")
     for s in steps:
         sev = s.get("failure_severity", "") if s["status"] in ("FAIL", "BLOCKED") else ""
         wf = _warnings_text(s)
+        sig = _signals_text(s)
         scr = os.path.basename(s["screenshot"]) if s.get("screenshot") else ""
         lines.append(
-            f"| {s['step']} | {s['step_name']} | {s['status']} | {sev} | {wf} "
+            f"| {s['step']} | {s['step_name']} | {s['status']} | {sev} | {wf} | {sig} "
             f"| {s['expected']} | {s['actual']} | {scr} |"
         )
     lines.append("")
