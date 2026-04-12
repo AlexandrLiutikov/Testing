@@ -1,10 +1,25 @@
 """Формирование решения о релизе по правилам DECISION_ENGINE."""
 
-from typing import Dict, List
+from typing import Dict, List, Optional, Set
 
 
 _VERDICT_RANK = {"GO": 0, "GO_WITH_RISK": 1, "NO_GO": 2}
 _SEV_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+_CONFIDENCE_RANK = {"INSUFFICIENT": 0, "DEGRADED": 1, "SUFFICIENT": 2, "FULL": 3}
+
+_STRONG_SOURCE_MARKERS = (
+    "UIA",
+    "ACCESSIBILITY",
+    "AT-SPI",
+    "AXUI",
+    "DOM",
+    "CDP",
+    "FILE_MODEL",
+    "FILE-MODEL",
+    "FILEMODEL",
+    "SEMANTIC",
+    "ASSERT",
+)
 
 
 def _confidence_from_steps(
@@ -70,6 +85,112 @@ def _max_verdict(*values: str) -> str:
     return max(values, key=lambda v: _VERDICT_RANK.get(v, 0))
 
 
+def _cap_confidence(current: str, cap: Optional[str]) -> str:
+    """Ограничить run_confidence сверху (FULL > SUFFICIENT > DEGRADED > INSUFFICIENT)."""
+    if not cap:
+        return current
+    if _CONFIDENCE_RANK.get(current, 0) > _CONFIDENCE_RANK.get(cap, 0):
+        return cap
+    return current
+
+
+def _step_sources(step: dict) -> Set[str]:
+    """Собрать источники верификации шага в нормализованном виде."""
+    sources = {str(src).strip().upper() for src in step.get("verification_sources", []) or [] if str(src).strip()}
+    fallback = str(step.get("fallback_source", "")).strip().upper()
+    if fallback:
+        sources.add(fallback)
+    return sources
+
+
+def _has_strong_source(sources: Set[str]) -> bool:
+    for source in sources:
+        if any(marker in source for marker in _STRONG_SOURCE_MARKERS):
+            return True
+    return False
+
+
+def _collect_signal_quality_risks(steps: list) -> dict:
+    """Выявить риски качества сигнала на critical path."""
+    critical_pass_steps = [
+        s for s in steps if s.get("critical_path") and s.get("status") == "PASS"
+    ]
+    weak_critical_pass_steps = [
+        s
+        for s in critical_pass_steps
+        if str(s.get("signal_strength", "")).strip().upper() == "WEAK"
+    ]
+
+    signal_risks: List[str] = []
+    warning_entries: List[str] = []
+    risky_weak_steps: List[dict] = []
+    weak_with_context_steps: List[dict] = []
+
+    for step in weak_critical_pass_steps:
+        sources = _step_sources(step)
+        source_text = ", ".join(sorted(sources)) if sources else "SOURCES_MISSING"
+        if sources:
+            weak_with_context_steps.append(step)
+        has_ocr = any("OCR" in src for src in sources)
+        has_coordinates = any("COORD" in src for src in sources)
+        has_strong = _has_strong_source(sources)
+
+        if has_ocr and has_coordinates and not has_strong:
+            risky_weak_steps.append(step)
+            signal_risks.append(
+                "HIGH / SIGNAL_QUALITY: "
+                f"critical-path шаг «{step.get('step_name')}» подтверждён только через "
+                f"OCR+COORDINATES без strong verification (sources: {source_text})."
+            )
+            warning_entries.append(
+                "HIGH: "
+                f"Critical-path шаг «{step.get('step_name')}» имеет WEAK signal "
+                "через OCR+COORDINATES без strong verification."
+            )
+            continue
+
+        signal_risks.append(
+            "MEDIUM / SIGNAL_QUALITY: "
+            f"critical-path шаг «{step.get('step_name')}» имеет WEAK signal "
+            f"(sources: {source_text})."
+        )
+        warning_entries.append(
+            "MEDIUM: "
+            f"Critical-path шаг «{step.get('step_name')}» подтверждён слабым сигналом."
+        )
+
+    weak_only_critical_pass = bool(critical_pass_steps) and (
+        len(weak_critical_pass_steps) == len(critical_pass_steps)
+    )
+    weak_only_with_context = weak_only_critical_pass and (
+        len(weak_with_context_steps) == len(critical_pass_steps)
+    )
+    risky_weak_only_critical_pass = weak_only_critical_pass and bool(
+        critical_pass_steps
+    ) and (len(risky_weak_steps) == len(critical_pass_steps))
+
+    confidence_cap = None
+    confidence_reasons: List[str] = []
+    if weak_only_with_context:
+        confidence_cap = "SUFFICIENT"
+        confidence_reasons.append(
+            "critical path пройден только шагами со слабым сигналом (WEAK)."
+        )
+    if risky_weak_only_critical_pass:
+        confidence_cap = "DEGRADED"
+        confidence_reasons.append(
+            "critical path подтверждён только OCR+COORDINATES без strong verification."
+        )
+
+    return {
+        "signal_risks": signal_risks,
+        "warning_entries": warning_entries,
+        "confidence_cap": confidence_cap,
+        "confidence_reasons": confidence_reasons,
+        "weak_critical_pass_count": len(weak_critical_pass_steps),
+    }
+
+
 def build_release_decision(steps: list, case_meta: dict) -> dict:
     total = len(steps)
     passed = sum(1 for s in steps if s["status"] == "PASS")
@@ -96,6 +217,19 @@ def build_release_decision(steps: list, case_meta: dict) -> dict:
     )
     run_confidence = conf["run_confidence"]
     run_confidence_detail = conf["run_confidence_detail"]
+
+    signal_quality = _collect_signal_quality_risks(steps)
+    base_confidence = run_confidence
+    run_confidence = _cap_confidence(
+        run_confidence,
+        signal_quality.get("confidence_cap"),
+    )
+    if run_confidence != base_confidence:
+        reasons_text = " ".join(signal_quality.get("confidence_reasons", []))
+        run_confidence_detail = (
+            f"{run_confidence_detail} "
+            f"Signal-quality cap: {base_confidence} -> {run_confidence}. {reasons_text}"
+        ).strip()
 
     product_verdict = _verdict_for_product_signals(test_fails)
     coverage_verdict = "GO_WITH_RISK" if critical_covered < critical_total else "GO"
@@ -139,6 +273,13 @@ def build_release_decision(steps: list, case_meta: dict) -> dict:
             sev = str(w.get("severity", "LOW")).upper()
             if msg:
                 warnings.append(f"{sev}: {msg} (шаг {s.get('step')})")
+    warnings.extend(signal_quality.get("warning_entries", []))
+
+    signal_risks = signal_quality.get("signal_risks", [])
+    if signal_risks:
+        reasons.append(
+            "Обнаружены риски качества сигнала на critical path; см. signal_risks."
+        )
 
     if critical_covered < critical_total:
         reasons.append(
@@ -179,9 +320,10 @@ def build_release_decision(steps: list, case_meta: dict) -> dict:
         "verdict": verdict,
         "reasons": reasons,
         "risks": risks,
+        "signal_risks": signal_risks,
         "infra_issues": infra_issues,
         "blocked_cases": blocked_cases,
-        "warnings": warnings,
+        "warnings": list(dict.fromkeys(warnings)),
         "recommendations": recommendations,
         "run_confidence": run_confidence,
         "run_confidence_detail": run_confidence_detail,
@@ -193,6 +335,7 @@ def build_release_decision(steps: list, case_meta: dict) -> dict:
             "blocked": len(blocked_steps),
             "warnings_total": sum(len(s.get("warnings", []) or []) for s in steps),
             "critical_path_coverage": f"{critical_covered}/{critical_total}",
+            "weak_critical_pass_steps": signal_quality.get("weak_critical_pass_count", 0),
             "worst_test_severity": worst_test_sev,
         },
     }
