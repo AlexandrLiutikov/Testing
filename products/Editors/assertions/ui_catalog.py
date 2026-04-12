@@ -1,73 +1,18 @@
 """Каталог UI-разделов для переиспользования в smoke-кейсах Editors."""
 
-START_MENU_EXPECTED = [
-    "Главная",
-    "Шаблоны",
-    "Локальные файлы",
-    "Совместная работа",
-    "Настройки",
-    "О программе",
-]
+from shared.infra.model_loader import load_yaml_model
+
+
+_UI_MODEL = load_yaml_model("products/Editors/models/ui/toolbar_tabs.yaml")
+
+START_MENU_EXPECTED = list(_UI_MODEL.get("start_menu", {}).get("expected", []))
 
 # Каталог вкладок редактора документов:
 # - required: признаки, отсутствие которых приводит к FAIL
 # - optional: признаки, изменения которых фиксируются как warning
-TOOLBAR_TABS = [
-    {
-        "name": "Файл",
-        "required": ["Сведения", "Сохранить как"],
-        "optional": ["Скачать как", "Версия"],
-        "need": 2,
-    },
-    {
-        "name": "Вставка",
-        "required": ["Таблица", "Изображение"],
-        "optional": ["Диаграмма", "Колонтитулы"],
-        "need": 2,
-    },
-    {
-        "name": "Рисование",
-        "required": ["Перо"],
-        "optional": ["Маркер", "Ластик"],
-        "need": 1,
-    },
-    {
-        "name": "Макет",
-        "required": ["Поля", "Ориентация"],
-        "optional": ["Размер", "Колонки"],
-        "need": 2,
-    },
-    {
-        "name": "Ссылки",
-        "required": ["Оглавление"],
-        "optional": ["Сноска", "Гиперссылка", "Закладка"],
-        "need": 1,
-    },
-    {
-        "name": "Совместная работа",
-        "required": ["Комментарий"],
-        "optional": ["Сравнить"],
-        "need": 1,
-    },
-    {
-        "name": "Защита",
-        "required": ["Зашифровать"],
-        "optional": ["Подпись"],
-        "need": 1,
-    },
-    {
-        "name": "Вид",
-        "required": ["Масштаб"],
-        "optional": ["Линейка", "Непечатаемые"],
-        "need": 1,
-    },
-    {
-        "name": "Плагины",
-        "required": ["Макросы"],
-        "optional": ["Менеджер"],
-        "need": 1,
-    },
-]
+TOOLBAR_TABS = list(_UI_MODEL.get("toolbar_tabs", []))
+
+UI_CATALOG_TOLERANCES = dict(_UI_MODEL.get("tolerances", {}))
 
 
 def diff_ui_items(observed: list, expected: list) -> dict:

@@ -1,0 +1,84 @@
+version: 1
+
+start_menu:
+  expected:
+    - Главная
+    - Шаблоны
+    - Локальные файлы
+    - Совместная работа
+    - Настройки
+    - О программе
+
+toolbar_tabs:
+  - name: Файл
+    required:
+      - Сведения
+      - Сохранить как
+    optional:
+      - Скачать как
+      - Версия
+    need: 2
+  - name: Вставка
+    required:
+      - Таблица
+      - Изображение
+    optional:
+      - Диаграмма
+      - Колонтитулы
+    need: 2
+  - name: Рисование
+    required:
+      - Перо
+    optional:
+      - Маркер
+      - Ластик
+    need: 1
+  - name: Макет
+    required:
+      - Поля
+      - Ориентация
+    optional:
+      - Размер
+      - Колонки
+    need: 2
+  - name: Ссылки
+    required:
+      - Оглавление
+    optional:
+      - Сноска
+      - Гиперссылка
+      - Закладка
+    need: 1
+  - name: Совместная работа
+    required:
+      - Комментарий
+    optional:
+      - Сравнить
+    need: 1
+  - name: Защита
+    required:
+      - Зашифровать
+    optional:
+      - Подпись
+    need: 1
+  - name: Вид
+    required:
+      - Масштаб
+    optional:
+      - Линейка
+      - Непечатаемые
+    need: 1
+  - name: Плагины
+    required:
+      - Макросы
+    optional:
+      - Менеджер
+    need: 1
+
+tolerances:
+  layout:
+    ui_shift_px_max: 5
+  visibility:
+    required_missing_is_fail: true
+    optional_missing_is_warning: true
+    optional_new_item_is_warning: true

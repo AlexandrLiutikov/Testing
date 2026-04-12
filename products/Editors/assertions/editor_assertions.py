@@ -10,118 +10,35 @@ import os
 from typing import List, Optional, Tuple
 
 from shared.infra.ocr import has_tokens, ocr_image
+from shared.infra.model_loader import load_yaml_model
 from shared.infra.screenshots import take_screenshot
 from shared.infra.waits import wait_main_proc
 
 from products.Editors.actions.editor_actions import detect_warning_window
 
-SMOKE_TEXT_ASSERT_TOKENS = [
-    "Задача организации",
-    "сложившаяся структура",
-    "Товарищи",
-    "систем массового участия",
-    "1234567890",
-]
+_REFERENCE_DOC_MODEL = load_yaml_model("products/Editors/models/docs/reference_docx.yaml")
 
-REFERENCE_DOC_OPEN_TOKENS = [
-    "Работа с текстом",
-    "параграф",
-    "буквица",
-]
-
+SMOKE_TEXT_ASSERT_TOKENS = list(_REFERENCE_DOC_MODEL.get("smoke_text_assert_tokens", []))
+REFERENCE_DOC_OPEN_TOKENS = list(_REFERENCE_DOC_MODEL.get("open_tokens", []))
 REFERENCE_DOC_PAGE_TOKENS = {
-    1: [
-        "Это особый колонтитул для первой страницы",
-        "Работа с текстом",
-        "Этот параграф в разделе",
-        "буквица",
-        "Страница 1 из 4",
-        "Страница 1 из4",
-    ],
-    2: [
-        "Работа с таблицами",
-        "Работа с формулами",
-        "ВСЕ ПРОПИСНЫЕ",
-        "Страница 2 из 4",
-        "Страница 2 из4",
-    ],
-    3: [
-        "Работа с диаграммами",
-        "Линейчатая диаграмма",
-        "Продажи",
-        "Работа с автофигурами",
-        "Промежуточная стадия",
-        "Страница 3 из 4",
-        "Страница 3 из4",
-    ],
-    4: [
-        "Этот колонтитул для четных страниц",
-        "Изображение для колонтитула",
-        "Страница 4 из 4",
-        "Страница 4 из4",
-    ],
+    int(page): list(tokens)
+    for page, tokens in (_REFERENCE_DOC_MODEL.get("page_tokens", {}) or {}).items()
 }
-
 REFERENCE_DOC_PAGE_FULL_VIEW_MARKERS = {
-    1: {
-        "top": [
-            "Это особый колонтитул для первой страницы",
-            "особый колонтитул для первой страницы",
-        ],
-        "bottom": [
-            "Страница 1 из 4",
-            "Страница 1 из4",
-            "Страница 1из 4",
-            "Страница 1из4",
-            "Страница из4",
-            "1 из 4",
-        ],
-    },
-    2: {
-        "top": [
-            "Этот колонтитул для четных страниц",
-            "Работа с таблицами",
-        ],
-        "bottom": [
-            "Страница 2 из 4",
-            "Страница 2 из4",
-            "Страница 2из 4",
-            "Страница 2из4",
-            "Страница 2",
-        ],
-    },
-    3: {
-        "top": [
-            "Работа с диаграммами",
-            "Линейчатая диаграмма",
-            "Работа с автофигурами",
-            "Работа савтофигурами",
-        ],
-        "bottom": [
-            "Страница 3 из 4",
-            "Страница 3 из4",
-            "Страница 3из 4",
-            "Страница 3из4",
-            "Страница 3 us 4",
-            "Страница зиз 4",
-            "Страница 3",
-        ],
-    },
-    4: {
-        "top": [
-            "Этот колонтитул для четных страниц",
-            "колонтитул для четных страниц",
-            "Изображение для колонтитула",
-        ],
-        "bottom": [
-            "Страница 4 из 4",
-            "Страница 4 из4",
-            "Страница 4из 4",
-            "Страница 4из4",
-            "Страница 4",
-        ],
-    },
+    int(page): {
+        "top": list((markers or {}).get("top", [])),
+        "bottom": list((markers or {}).get("bottom", [])),
+    }
+    for page, markers in (_REFERENCE_DOC_MODEL.get("full_view_markers", {}) or {}).items()
 }
+REFERENCE_DOC_TOLERANCES = dict(_REFERENCE_DOC_MODEL.get("tolerances", {}))
+_REFERENCE_DOC_LAYOUT_TOLERANCES = REFERENCE_DOC_TOLERANCES.get("layout", {})
+DEFAULT_FULL_VIEW_TOP_MAX_RATIO = float(
+    _REFERENCE_DOC_LAYOUT_TOLERANCES.get("full_view_top_max_ratio", 0.45)
+)
+DEFAULT_FULL_VIEW_BOTTOM_MIN_RATIO = float(
+    _REFERENCE_DOC_LAYOUT_TOLERANCES.get("full_view_bottom_min_ratio", 0.55)
+)
 
 
 def assert_window_exists(
@@ -209,8 +126,8 @@ def assert_reference_document_page_full_view(
     screenshot_path: str,
     page_index: int,
     capture: bool = True,
-    top_max_ratio: float = 0.45,
-    bottom_min_ratio: float = 0.55,
+    top_max_ratio: float = DEFAULT_FULL_VIEW_TOP_MAX_RATIO,
+    bottom_min_ratio: float = DEFAULT_FULL_VIEW_BOTTOM_MIN_RATIO,
 ) -> Tuple[bool, List[str]]:
     """Проверить, что страница отображается целиком (верх+низ страницы видны)."""
     markers = REFERENCE_DOC_PAGE_FULL_VIEW_MARKERS.get(page_index)
