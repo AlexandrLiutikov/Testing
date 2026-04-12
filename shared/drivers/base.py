@@ -6,7 +6,9 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
+
+from shared.infra.geometry import build_standard_regions, normalize_regions, rect_from_tuple
 
 
 class BaseDriver(ABC):
@@ -115,6 +117,35 @@ class BaseDriver(ABC):
     def get_window_rect(self, pid: int) -> Optional[Tuple[int, int, int, int]]:
         """Вернуть координаты окна ``(left, top, right, bottom)`` или ``None``."""
         ...
+
+    def get_window_regions(
+        self,
+        pid: int,
+        *,
+        toolbar_height_ratio: float = 0.16,
+        status_bar_height_ratio: float = 0.06,
+        page_margin_x_ratio: float = 0.08,
+        page_margin_y_ratio: float = 0.03,
+    ) -> Optional[Dict[str, Any]]:
+        """Вернуть канонические регионы окна в абсолютных и нормализованных координатах."""
+        window = self.get_window_rect(pid)
+        if not window:
+            return None
+        window_rect = rect_from_tuple(window)
+        absolute = build_standard_regions(
+            window_rect,
+            toolbar_height_ratio=toolbar_height_ratio,
+            status_bar_height_ratio=status_bar_height_ratio,
+            page_margin_x_ratio=page_margin_x_ratio,
+            page_margin_y_ratio=page_margin_y_ratio,
+        )
+        normalized = normalize_regions(absolute, window_rect)
+        return {
+            "absolute": {name: rect.to_tuple() for name, rect in absolute.items()},
+            "normalized": {
+                name: norm_rect.to_dict() for name, norm_rect in normalized.items()
+            },
+        }
 
     # ------------------------------------------------------------------
     # Modal / warning detection (может быть не реализован на некоторых ОС)
