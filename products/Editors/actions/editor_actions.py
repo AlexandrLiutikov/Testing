@@ -686,6 +686,58 @@ def list_toolbar_tabs_dom() -> list:
     return []
 
 
+def list_active_toolbar_controls_dom() -> list:
+    """Вернуть список видимых текстовых контролов активной вкладки ленты."""
+    result = _cdp_eval_in_editor_frame(
+        """
+  const normalize = (raw) => (raw || '')
+    .replace(/\\s+/g, ' ')
+    .trim();
+
+  const isVisible = (el) => {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 6 && r.height > 6;
+  };
+
+  const topBandMin = window.innerHeight * 0.08;
+  const topBandMax = window.innerHeight * 0.38;
+
+  const tabLabels = new Set(
+    Array.from(doc.querySelectorAll('.tabs li.ribtab > a[data-tab], li.ribtab > a[data-tab]'))
+      .map(el => normalize(el.getAttribute('data-title') || el.textContent || ''))
+      .filter(Boolean)
+  );
+
+  const isToolbarControl = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.top < topBandMin || r.top > topBandMax) return false;
+    if (el.closest('.tabs') || el.closest('li.ribtab')) return false;
+    if (el.hasAttribute('data-tab') || el.getAttribute('role') === 'tab') return false;
+    return true;
+  };
+
+  const rawItems = Array.from(doc.querySelectorAll('button, a, span, div, label'))
+    .filter(isVisible)
+    .filter(isToolbarControl)
+    .map(el => normalize(el.textContent || ''))
+    .filter(Boolean)
+    .filter(text => text.length >= 2 && text.length <= 64)
+    .filter(text => !tabLabels.has(text));
+
+  const uniq = Array.from(new Set(rawItems)).slice(0, 120);
+  return {ok: true, items: uniq};
+"""
+    )
+    if isinstance(result, dict):
+        items = result.get("items")
+        if isinstance(items, list):
+            return [str(x).strip() for x in items if str(x).strip()]
+    return []
+
+
 def _click_quick_access_button_via_cdp(button_key: str) -> bool:
     selectors = _QUICK_ACCESS_SELECTORS.get(button_key, [])
     for selector in selectors:

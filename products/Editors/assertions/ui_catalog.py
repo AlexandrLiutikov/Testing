@@ -13,6 +13,7 @@ START_SCREEN_SECTIONS = dict(_UI_MODEL.get("start_screen", {}).get("sections", {
 # - optional: признаки, изменения которых фиксируются как warning
 TOOLBAR_TABS = list(_UI_MODEL.get("toolbar_tabs", []))
 TOOLBAR_TABS_WARNING_EXPECTED = list(_UI_MODEL.get("toolbar_tabs_warning_expected", []))
+TOOLBAR_TAB_CONTROLS_EXPECTED = dict(_UI_MODEL.get("toolbar_tab_controls_expected", {}))
 
 UI_CATALOG_TOLERANCES = dict(_UI_MODEL.get("tolerances", {}))
 
@@ -45,6 +46,26 @@ def toolbar_tab_warning_expected_names() -> list:
         seen.add(key)
         out.append(key)
     return out
+
+
+def toolbar_tab_controls_expected(tab_name: str) -> list:
+    """Вернуть каталог ожидаемых контролов внутри активной вкладки."""
+    key = str(tab_name).strip()
+    if not key:
+        return []
+
+    direct = TOOLBAR_TAB_CONTROLS_EXPECTED.get(key, [])
+    if isinstance(direct, list) and direct:
+        return [str(item).strip() for item in direct if str(item).strip()]
+
+    # Fallback: если раздел controls не задан, используем required+optional.
+    for tab in TOOLBAR_TABS:
+        if str(tab.get("name", "")).strip() != key:
+            continue
+        required = [str(x).strip() for x in tab.get("required", []) if str(x).strip()]
+        optional = [str(x).strip() for x in tab.get("optional", []) if str(x).strip()]
+        return list(dict.fromkeys(required + optional))
+    return []
 
 
 def start_screen_section(section_key: str) -> dict:
