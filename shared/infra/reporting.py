@@ -5,6 +5,16 @@ import os
 from datetime import datetime
 
 
+def _signal_strength_ru(value: str) -> str:
+    mapping = {
+        "STRONG": "СИЛЬНЫЙ",
+        "MEDIUM": "СРЕДНИЙ",
+        "WEAK": "СЛАБЫЙ",
+    }
+    key = str(value or "").strip().upper()
+    return mapping.get(key, key or "Н/Д")
+
+
 def _warnings_text(step: dict) -> str:
     warnings = step.get("warnings", []) or []
     fallback_source = step.get("fallback_source")
@@ -27,16 +37,16 @@ def _warnings_text(step: dict) -> str:
     signal_strength = step.get("signal_strength")
     signal_notes = step.get("signal_notes", []) or []
     if signal_strength or sources:
-        signal_chunk = "SIGNAL"
+        signal_chunk = "СИГНАЛ"
         if signal_strength:
-            signal_chunk += f": {signal_strength}"
+            signal_chunk += f": {_signal_strength_ru(signal_strength)}"
         if sources:
-            signal_chunk += f" via {', '.join(str(s) for s in sources)}"
+            signal_chunk += f" через {', '.join(str(s) for s in sources)}"
         chunks.append(signal_chunk)
     for note in signal_notes:
         note_text = str(note).strip()
         if note_text:
-            chunks.append(f"SIGNAL_NOTE: {note_text}")
+            chunks.append(f"ПРИМЕЧАНИЕ СИГНАЛА: {note_text}")
 
     return " | ".join(chunks)
 
