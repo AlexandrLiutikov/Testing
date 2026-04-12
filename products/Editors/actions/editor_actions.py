@@ -1145,6 +1145,47 @@ _DOC_LABELS = {
     "presentation": "Презентация",
 }
 
+_DOC_ACTIONS = {
+    "document": "new:docx",
+    "spreadsheet": "new:xlsx",
+    "presentation": "new:pptx",
+}
+
+
+def _cdp_click_new_document_tile(doc_type: str) -> bool:
+    """Кликнуть по плитке создания документа на стартовом экране через DOM/CDP."""
+    action = _DOC_ACTIONS.get(doc_type)
+    if not action:
+        return False
+
+    result = _cdp_eval_root(
+        f"""
+  const action = {json.dumps(action)};
+  const isVisible = (el) => {{
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (!style || style.display === 'none' || style.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 8 && r.height > 8;
+  }};
+
+  const candidates = Array.from(
+    document.querySelectorAll(
+      `li.big-icon-item a.big-icon-item__link[action="${{action}}"], a[action="${{action}}"]`
+    )
+  ).filter(isVisible);
+
+  if (!candidates.length) {{
+    return {{ok:false, reason:'tile_not_found', action}};
+  }}
+
+  const tile = candidates[0];
+  tile.click();
+  return {{ok:true, action}};
+"""
+    )
+    return bool(isinstance(result, dict) and result.get("ok"))
+
 
 def open_document_by_path(
     editor_path: str,
@@ -1216,6 +1257,10 @@ def create_document(pid: int, doc_type: str = "document",
     driver = get_driver()
     driver.activate_window(pid)
 
+    # Основной путь: DOM/CDP клик по action-элементу плитки создания файла.
+    if _cdp_click_new_document_tile(doc_type):
+        return _trace("create_document", True, "DOM_CDP")
+
     # Свежий скриншот стартового экрана для OCR-калибровки
     import tempfile, os as _os
     if not screenshot_path:
@@ -1242,7 +1287,10 @@ def create_document(pid: int, doc_type: str = "document",
         "OCR",
         fallback_used=True,
         fallback_source="OCR_CREATE_DOCUMENT",
-        fallback_reason="Создание документа выполнено OCR-кликом на стартовом экране.",
+        fallback_reason=(
+            "DOM/CDP-клик плитки создания документа недоступен; "
+            "выполнен OCR fallback на стартовом экране."
+        ),
     )
 
 
