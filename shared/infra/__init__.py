@@ -9,6 +9,7 @@ from shared.infra.step_helpers import (
     StepVerifier,
 )
 from shared.infra.test_runner import CaseRunner
+from shared.infra.verification import VerificationResult, build_result, merge_results
 
 __all__ = [
     "wait_until",
@@ -20,4 +21,7 @@ __all__ = [
     "capture_step",
     "StepVerifier",
     "CaseRunner",
+    "VerificationResult",
+    "build_result",
+    "merge_results",
 ]
