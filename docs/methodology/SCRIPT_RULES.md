@@ -1000,3 +1000,21 @@ driver.click_at(x=540, y=380)
 - не классифицирует сбои по типу (`TEST_FAIL` / `INFRA_FAIL` / `BLOCKED`);
 - не содержит `CASE_META` с привязкой к модели рисков;
 - не формирует блок `release_decision`.
+
+---
+
+## 23. Целевая модель верификации (обязательная привязка)
+
+Для этапов миграции и новых сценариев Editors использовать
+`docs/methodology/TARGET_MODEL_GLOSSARY.md` как канонический источник:
+
+- единый glossary (`UI-state-driven`, `file-model-backed`, `geometry-aware`,
+  feature-based visual verification, risk-based decisioning);
+- список approved verification sources с приоритетами;
+- Definition of Done для миграции.
+
+Проверяемый критерий:
+- при ревью сценария должно быть явно видно, какие approved sources использованы
+  для каждого критического шага;
+- если источник выбран вне approved-списка, это считается отклонением и требует
+  отдельного согласования с пользователем.
