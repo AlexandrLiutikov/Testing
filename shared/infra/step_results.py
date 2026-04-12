@@ -14,6 +14,44 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime
 from typing import List, Optional
 
+ALLOWED_SIGNAL_STRENGTHS = {"STRONG", "MEDIUM", "WEAK"}
+
+
+def normalize_verification_sources(sources: Optional[List[str]]) -> List[str]:
+    """Нормализовать список источников верификации и убрать дубли."""
+    normalized: List[str] = []
+    for source in sources or []:
+        value = str(source).strip().upper()
+        if value and value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def normalize_signal_notes(notes: Optional[List[str]]) -> List[str]:
+    """Нормализовать пояснения к сигналу."""
+    normalized: List[str] = []
+    for note in notes or []:
+        value = str(note).strip()
+        if value:
+            normalized.append(value)
+    return normalized
+
+
+def infer_signal_strength(
+    verification_sources: List[str],
+    signal_strength: Optional[str],
+) -> str:
+    """Определить силу сигнала, сохраняя совместимость со старыми шагами."""
+    if signal_strength:
+        candidate = str(signal_strength).strip().upper()
+        if candidate in ALLOWED_SIGNAL_STRENGTHS:
+            return candidate
+    if len(verification_sources) >= 2:
+        return "STRONG"
+    if len(verification_sources) == 1:
+        return "MEDIUM"
+    return "WEAK"
+
 
 @dataclass
 class StepResult:
@@ -39,6 +77,9 @@ class StepResult:
         warnings:            Непрерывающие предупреждения шага
         fallback_source:     Источник fallback (например HOTKEY, OCR, COORDINATES)
         fallback_reason:     Причина перехода на fallback
+        verification_sources: Источники подтверждения шага (DOM/OCR/GEOMETRY...)
+        signal_strength:     Сила сигнала (STRONG/MEDIUM/WEAK)
+        signal_notes:        Пояснения к силе/источникам сигнала
     """
 
     step_id: str
@@ -60,6 +101,19 @@ class StepResult:
     warnings: List[dict] = field(default_factory=list)
     fallback_source: Optional[str] = None
     fallback_reason: Optional[str] = None
+    verification_sources: List[str] = field(default_factory=list)
+    signal_strength: str = "WEAK"
+    signal_notes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.verification_sources = normalize_verification_sources(
+            self.verification_sources
+        )
+        self.signal_notes = normalize_signal_notes(self.signal_notes)
+        self.signal_strength = infer_signal_strength(
+            self.verification_sources,
+            self.signal_strength,
+        )
 
     def to_dict(self) -> dict:
         """Сериализовать в dict для JSON/CSV/отчётов."""
@@ -79,6 +133,9 @@ class StepResult:
         warnings: Optional[List[dict]] = None,
         fallback_source: Optional[str] = None,
         fallback_reason: Optional[str] = None,
+        verification_sources: Optional[List[str]] = None,
+        signal_strength: Optional[str] = None,
+        signal_notes: Optional[List[str]] = None,
     ) -> "StepResult":
         """Создать результат успешного шага."""
         return cls(
@@ -95,6 +152,9 @@ class StepResult:
             warnings=list(warnings or []),
             fallback_source=fallback_source,
             fallback_reason=fallback_reason,
+            verification_sources=list(verification_sources or []),
+            signal_strength=signal_strength or "",
+            signal_notes=list(signal_notes or []),
         )
 
     @classmethod
@@ -115,6 +175,9 @@ class StepResult:
         warnings: Optional[List[dict]] = None,
         fallback_source: Optional[str] = None,
         fallback_reason: Optional[str] = None,
+        verification_sources: Optional[List[str]] = None,
+        signal_strength: Optional[str] = None,
+        signal_notes: Optional[List[str]] = None,
     ) -> "StepResult":
         """Создать результат неудачного шага."""
         return cls(
@@ -135,6 +198,9 @@ class StepResult:
             warnings=list(warnings or []),
             fallback_source=fallback_source,
             fallback_reason=fallback_reason,
+            verification_sources=list(verification_sources or []),
+            signal_strength=signal_strength or "",
+            signal_notes=list(signal_notes or []),
         )
 
     @classmethod
@@ -152,6 +218,9 @@ class StepResult:
         warnings: Optional[List[dict]] = None,
         fallback_source: Optional[str] = None,
         fallback_reason: Optional[str] = None,
+        verification_sources: Optional[List[str]] = None,
+        signal_strength: Optional[str] = None,
+        signal_notes: Optional[List[str]] = None,
     ) -> "StepResult":
         """Создать результат заблокированного шага (не выполнился из-за предыдущего сбоя)."""
         return cls(
@@ -170,4 +239,7 @@ class StepResult:
             warnings=list(warnings or []),
             fallback_source=fallback_source,
             fallback_reason=fallback_reason,
+            verification_sources=list(verification_sources or []),
+            signal_strength=signal_strength or "",
+            signal_notes=list(signal_notes or []),
         )
