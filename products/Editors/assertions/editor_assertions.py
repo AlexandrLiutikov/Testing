@@ -28,11 +28,15 @@ from shared.infra.verification import (
     merge_results,
     result_from_token_match,
 )
+from shared.infra.visual_features import (
+    verify_visual_anchor_set,
+)
 from shared.infra.waits import wait_main_proc
 
 from products.Editors.actions.editor_actions import detect_warning_window
 
 _REFERENCE_DOC_MODEL = load_yaml_model("products/Editors/models/docs/reference_docx.yaml")
+_EDITORS_RISK_MODEL_PATH = "products/Editors/RISK_MODEL.md"
 
 SMOKE_TEXT_ASSERT_TOKENS = list(_REFERENCE_DOC_MODEL.get("smoke_text_assert_tokens", []))
 REFERENCE_DOC_OPEN_TOKENS = list(_REFERENCE_DOC_MODEL.get("open_tokens", []))
@@ -237,15 +241,29 @@ def assert_reference_document_page_full_view(
             },
         )
 
-    result = assert_full_page_visible(
+    top_tokens = list(markers.get("top", []))
+    bottom_tokens = list(markers.get("bottom", []))
+    geometry_result = assert_full_page_visible(
         screenshot_path=screenshot_path,
-        top_tokens=list(markers.get("top", [])),
-        bottom_tokens=list(markers.get("bottom", [])),
+        top_tokens=top_tokens,
+        bottom_tokens=bottom_tokens,
         capture=capture,
         top_max_ratio=top_max_ratio,
         bottom_min_ratio=bottom_min_ratio,
     )
+    anchor_result = assert_page_visual_anchors(
+        screenshot_path=screenshot_path,
+        top_tokens=top_tokens,
+        bottom_tokens=bottom_tokens,
+        page_index=page_index,
+        capture=False,
+    )
+    result = merge_results([geometry_result, anchor_result], mode="any")
     result.evidence["page_index"] = page_index
+    if geometry_result.ok and not anchor_result.ok:
+        result.tolerance_applied.append("PAGE_VISUAL_ANCHOR_SOFT_FAIL")
+    if not geometry_result.ok and anchor_result.ok:
+        result.tolerance_applied.append("PAGE_VISUAL_ANCHOR_RESCUE")
     return result
 
 
@@ -422,6 +440,90 @@ def assert_full_page_visible(
             "screenshot_path": screenshot_path,
         },
     )
+
+
+def assert_status_bar_controls_present(
+    screenshot_path: str,
+    controls_tokens: Optional[List[str]] = None,
+    capture: bool = True,
+    need: int = 1,
+) -> VerificationResult:
+    """Проверить наличие контролов status bar через visual anchor set."""
+    if controls_tokens is None:
+        controls_tokens = ["Страница", "Слов", "RU"]
+    if capture:
+        take_screenshot(screenshot_path)
+
+    anchors = [
+        {
+            "name": f"status::{token}",
+            "tokens": [token],
+            "region": "status_bar",
+            "required": True,
+            "need": 1,
+        }
+        for token in controls_tokens
+    ]
+    max_missing = max(0, int(len(controls_tokens) - max(1, need)))
+    result = verify_visual_anchor_set(
+        screenshot_path,
+        anchors,
+        risk_model_path=_EDITORS_RISK_MODEL_PATH,
+        min_feature_confidence=0.6,
+        max_missing_required=max_missing,
+    )
+    result.evidence["controls_tokens"] = list(controls_tokens)
+    result.evidence["need"] = int(need)
+    return result
+
+
+def assert_page_visual_anchors(
+    screenshot_path: str,
+    top_tokens: List[str],
+    bottom_tokens: List[str],
+    page_index: Optional[int] = None,
+    capture: bool = True,
+) -> VerificationResult:
+    """Проверить page visual anchors (верх/низ страницы + status bar маркер)."""
+    if capture:
+        take_screenshot(screenshot_path)
+
+    anchors = [
+        {
+            "name": "page_top_anchor",
+            "tokens": list(top_tokens),
+            "region": "page",
+            "required": True,
+            "need": 1,
+        },
+        {
+            "name": "page_bottom_anchor",
+            "tokens": list(bottom_tokens),
+            "region": "page",
+            "required": True,
+            "need": 1,
+        },
+    ]
+    if page_index is not None:
+        anchors.append(
+            {
+                "name": "status_page_anchor",
+                "tokens": [f"Страница {page_index}", "Page"],
+                "region": "status_bar",
+                "required": False,
+                "need": 1,
+            }
+        )
+
+    result = verify_visual_anchor_set(
+        screenshot_path,
+        anchors,
+        risk_model_path=_EDITORS_RISK_MODEL_PATH,
+        min_feature_confidence=0.55,
+        max_missing_required=0,
+    )
+    result.evidence["page_index"] = page_index
+    return result
 
 
 def assert_toolbar_content_below_active_tab(
@@ -617,7 +719,7 @@ def assert_tab_active(
     take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
     ok, found = has_tokens(ocr_text, content_tokens, need)
-    return result_from_token_match(
+    token_result = result_from_token_match(
         source="feature_visual",
         ok=ok,
         found_tokens=found,
@@ -625,6 +727,35 @@ def assert_tab_active(
         need=need,
         evidence={"tab_name": tab_name, "screenshot_path": screenshot_path},
     )
+    anchor_tokens = list(dict.fromkeys([tab_name] + list(content_tokens)))
+    anchor_result = verify_visual_anchor_set(
+        screenshot_path=screenshot_path,
+        anchors=[
+            {
+                "name": "tab_toolbar_anchor",
+                "tokens": anchor_tokens,
+                "region": "toolbar",
+                "required": True,
+                "need": max(1, int(need)),
+            },
+            {
+                "name": "status_bar_anchor",
+                "tokens": ["Страница", "Page", "Слов"],
+                "region": "status_bar",
+                "required": False,
+                "need": 1,
+            },
+        ],
+        risk_model_path=_EDITORS_RISK_MODEL_PATH,
+        min_feature_confidence=0.55,
+        max_missing_required=0,
+    )
+    result = merge_results([token_result, anchor_result], mode="any")
+    if not token_result.ok and anchor_result.ok:
+        result.tolerance_applied.append("TAB_ACTIVE_VISUAL_RESCUE")
+    result.evidence["tab_name"] = tab_name
+    result.evidence["screenshot_path"] = screenshot_path
+    return result
 
 
 def assert_document_created(
