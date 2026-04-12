@@ -128,34 +128,10 @@ def type_document_text(pid: int, text: str, align_left: bool = False):
     driver = get_driver()
     driver.activate_window(pid)
 
-    warnings = []
-    used_fallback = False
-    fallback_source = ""
-    fallback_reason = ""
-
-    # Основной путь: попытка сфокусировать содержимое редактора через DOM.
-    focus = _cdp_eval_in_editor_frame(
-        """
-  const target = doc.querySelector('[contenteditable="true"], [role="textbox"], .ace_content');
-  if (!target) return {ok:false, reason:'focus_target_not_found'};
-  target.focus();
-  return {ok:true};
-"""
-    )
-    focused = bool(isinstance(focus, dict) and focus.get("ok"))
-    if not focused:
-        used_fallback = True
-        fallback_source = "COORDINATE_FOCUS"
-        fallback_reason = "DOM focus недоступен; фокус установлен координатным кликом."
-        warnings.append({
-            "code": "FOCUS_FALLBACK",
-            "severity": "LOW",
-            "message": "DOM-фокус недоступен, использован координатный фокус.",
-        })
-        # FALLBACK: у CEF-холста нет стабильного accessibility-id, поэтому
-        # фокусируем рабочую область относительным кликом по центру страницы.
-        driver.click_rel(pid, 0.50, 0.45)
-        time.sleep(0.2)
+    # Для документа Editors рабочая область рендерится как canvas во viewport.
+    # Поэтому фокус ставим напрямую в область страницы координатным кликом.
+    driver.click_rel(pid, 0.50, 0.45)
+    time.sleep(0.2)
 
     driver.paste_text(pid, text)
     if align_left:
@@ -163,11 +139,7 @@ def type_document_text(pid: int, text: str, align_left: bool = False):
     return _trace(
         "type_document_text",
         True,
-        "DOM_FOCUS" if focused else "COORDINATE_FOCUS",
-        fallback_used=used_fallback,
-        fallback_source=fallback_source,
-        fallback_reason=fallback_reason,
-        warnings=warnings,
+        "CANVAS_VIEWPORT_FOCUS",
     )
 
 

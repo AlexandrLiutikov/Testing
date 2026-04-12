@@ -66,10 +66,13 @@ def ocr_image(image_path: str) -> str:
     return "\n".join(parts).strip() if parts else ""
 
 
-def _normalize(s: str) -> str:
-    if not s:
+def _normalize(s) -> str:
+    if s is None:
         return ""
-    return re.sub(r"[^A-ZА-Я0-9]", "", s.upper().replace("Ё", "Е"))
+    text = str(s)
+    if not text:
+        return ""
+    return re.sub(r"[^A-ZА-Я0-9]", "", text.upper().replace("Ё", "Е"))
 
 
 def has_tokens(text: str, tokens: List[str], need: int = 1) -> Tuple[bool, List[str]]:

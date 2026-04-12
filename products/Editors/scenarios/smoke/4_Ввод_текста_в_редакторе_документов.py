@@ -156,7 +156,7 @@ def main():
                 step,
                 input_trace,
                 "type_document_text",
-                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+                primary_modes=("CANVAS_VIEWPORT_FOCUS", "DOM_FOCUS"),
             )
             apply_verification_result(step, last_text_result, context="text_input_left_aligned")
             step.check(
