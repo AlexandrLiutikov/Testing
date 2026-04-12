@@ -21,7 +21,13 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(_PRODUCT_DIR))
 sys.path.insert(0, _PROJECT_ROOT)
 
 # === Reuseable инфраструктура ===
-from shared.infra import CaseRunner, StepVerifier, capture_step
+from shared.infra import (
+    CaseRunner,
+    StepVerifier,
+    apply_action_trace,
+    apply_verification_result,
+    capture_step,
+)
 from shared.infra.waits import wait_main_proc
 from shared.drivers import get_driver
 
@@ -56,35 +62,6 @@ CASE_META = {
     "risk_level": "HIGH",
     "critical_path": True,
 }
-
-
-def _attach_action_trace(step, trace: dict, action_name: str):
-    """Пробросить fallback/warnings из action-трассировки в шаг отчёта."""
-    if not trace:
-        trace = consume_action_trace(action_name) or {}
-    if not trace:
-        return
-
-    if trace.get("fallback_used"):
-        step.set_fallback(
-            trace.get("fallback_source", ""),
-            trace.get("fallback_reason", ""),
-        )
-
-    mode = trace.get("mode", "")
-    if mode and mode not in ("DOM_CDP", "DOM_FOCUS"):
-        step.add_warning(
-            code=f"{action_name.upper()}_MODE",
-            severity="LOW",
-            message=f"Action выполнился в режиме {mode}, а не в DOM primary.",
-        )
-
-    for w in trace.get("warnings", []) or []:
-        step.add_warning(
-            code=w.get("code", "ACTION_WARNING"),
-            severity=w.get("severity", "LOW"),
-            message=w.get("message", ""),
-        )
 
 
 def _menu_drift_warnings():
@@ -154,7 +131,7 @@ def main():
         # ==============================================================
         s1_path = capture_step(runner.run_dir, 1, "home",
                                activate_driver=driver, pid=pid)
-        ok, _ = assert_section_visible(
+        home_result = assert_section_visible(
             s1_path,
             ["Создавайте новые файлы", "Документ", "Таблица", "Презентация"],
             need=2,
@@ -168,6 +145,7 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s1_path)
+            apply_verification_result(step, home_result, context="home_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -175,7 +153,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=ok,
+                condition=bool(home_result),
                 pass_msg="Главное окно редактора открыто, отображается стартовый экран",
                 fail_msg="Токены «Главная» не обнаружены на стартовом экране",
             )
@@ -187,7 +165,7 @@ def main():
 
         s2_path = capture_step(runner.run_dir, 2, "templates",
                                activate_driver=driver, pid=pid)
-        ok, _ = assert_section_visible(
+        templates_result = assert_section_visible(
             s2_path,
             ["Шаблоны документов", "Избранное", "Подключить папку"],
             need=1,
@@ -201,7 +179,13 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s2_path)
-            _attach_action_trace(step, menu_trace, "click_menu")
+            apply_action_trace(
+                step,
+                menu_trace or consume_action_trace("click_menu"),
+                "click_menu",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, templates_result, context="templates_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -209,7 +193,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=ok,
+                condition=bool(templates_result),
                 pass_msg="Раздел «Шаблоны» открыт и отображается корректно",
                 fail_msg="Раздел «Шаблоны» не подтверждён на экране после клика",
             )
@@ -221,7 +205,7 @@ def main():
 
         s3_path = capture_step(runner.run_dir, 3, "local",
                                activate_driver=driver, pid=pid)
-        ok, _ = assert_section_visible(
+        local_result = assert_section_visible(
             s3_path,
             ["Локальные файлы", "Выбрать папку", "Подключить папку"],
             need=1,
@@ -235,7 +219,13 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s3_path)
-            _attach_action_trace(step, menu_trace, "click_menu")
+            apply_action_trace(
+                step,
+                menu_trace or consume_action_trace("click_menu"),
+                "click_menu",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, local_result, context="local_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -243,7 +233,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=ok,
+                condition=bool(local_result),
                 pass_msg="Раздел «Локальные файлы» открыт и отображается корректно",
                 fail_msg="Раздел «Локальные файлы» не подтверждён на экране после клика",
             )
@@ -255,7 +245,7 @@ def main():
 
         s4_path = capture_step(runner.run_dir, 4, "collab_popup",
                                activate_driver=driver, pid=pid)
-        popup_ok, _ = assert_popup_visible(
+        popup_result = assert_popup_visible(
             s4_path,
             ["Выберите диск для подключения", "URL диска",
              "Подключить", "Р7-Диск", "VK WorkSpace"],
@@ -270,7 +260,13 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s4_path)
-            _attach_action_trace(step, menu_trace, "click_menu")
+            apply_action_trace(
+                step,
+                menu_trace or consume_action_trace("click_menu"),
+                "click_menu",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, popup_result, context="collab_popup_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -278,7 +274,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=popup_ok,
+                condition=bool(popup_result),
                 pass_msg="Модальное окно подключения диска появилось",
                 fail_msg="Модальное окно подключения не обнаружено",
             )
@@ -290,7 +286,7 @@ def main():
 
         s5_path = capture_step(runner.run_dir, 5, "after_popup_close",
                                activate_driver=driver, pid=pid)
-        popup_closed = assert_popup_closed(
+        popup_closed_result = assert_popup_closed(
             s5_path,
             ["Выберите диск для подключения", "URL диска", "Подключить"],
         )
@@ -303,8 +299,9 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s5_path)
+            apply_verification_result(step, popup_closed_result, context="collab_popup_closed")
             step.check(
-                condition=popup_closed,
+                condition=bool(popup_closed_result),
                 pass_msg="Всплывающее окно закрыто, отображается меню «Локальные файлы»",
                 fail_msg="Модальное окно подключения не закрылось по кнопке «X»",
             )
@@ -316,7 +313,7 @@ def main():
 
         s6_path = capture_step(runner.run_dir, 6, "settings",
                                activate_driver=driver, pid=pid)
-        ok, _ = assert_section_visible(
+        settings_result = assert_section_visible(
             s6_path,
             ["Настройки", "Язык интерфейса", "Масштабирование интерфейса"],
             need=2,
@@ -330,7 +327,13 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s6_path)
-            _attach_action_trace(step, menu_trace, "click_menu")
+            apply_action_trace(
+                step,
+                menu_trace or consume_action_trace("click_menu"),
+                "click_menu",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, settings_result, context="settings_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -338,7 +341,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=ok,
+                condition=bool(settings_result),
                 pass_msg="Раздел «Настройки» открыт и отображается корректно",
                 fail_msg="Раздел «Настройки» не подтверждён на экране после клика",
             )
@@ -350,7 +353,7 @@ def main():
 
         s7_path = capture_step(runner.run_dir, 7, "about",
                                activate_driver=driver, pid=pid)
-        ok, _ = assert_section_visible(
+        about_result = assert_section_visible(
             s7_path,
             ["Профессиональный (десктопная версия)",
              "Лицензионное соглашение", "Техподдержка"],
@@ -365,7 +368,13 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s7_path)
-            _attach_action_trace(step, menu_trace, "click_menu")
+            apply_action_trace(
+                step,
+                menu_trace or consume_action_trace("click_menu"),
+                "click_menu",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, about_result, context="about_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -373,7 +382,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=ok,
+                condition=bool(about_result),
                 pass_msg="Раздел «О программе» открыт и отображается корректно",
                 fail_msg="Раздел «О программе» не подтверждён на экране после клика",
             )
@@ -385,7 +394,7 @@ def main():
 
         s8_path = capture_step(runner.run_dir, 8, "home_return",
                                activate_driver=driver, pid=pid)
-        ok, _ = assert_section_visible(
+        home_return_result = assert_section_visible(
             s8_path,
             ["Самое время начать", "Создавайте новые файлы",
              "Документ", "Таблица", "Презентация"],
@@ -400,7 +409,13 @@ def main():
             failure_area="UI_LAYOUT",
         ) as step:
             step.screenshot(s8_path)
-            _attach_action_trace(step, menu_trace, "click_menu")
+            apply_action_trace(
+                step,
+                menu_trace or consume_action_trace("click_menu"),
+                "click_menu",
+                primary_modes=("DOM_CDP", "DOM_FOCUS"),
+            )
+            apply_verification_result(step, home_return_result, context="home_return_visible")
             for w in _menu_drift_warnings():
                 step.add_warning(
                     code=w["code"],
@@ -408,7 +423,7 @@ def main():
                     message=w["message"],
                 )
             step.check(
-                condition=ok,
+                condition=bool(home_return_result),
                 pass_msg="Возврат на «Главная» выполнен, стартовый экран отображается",
                 fail_msg="Возврат на «Главная» не подтверждён по OCR-токенам",
             )
