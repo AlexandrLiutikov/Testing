@@ -70,9 +70,14 @@ def capture_step(run_dir: str, step_num: int, name: str,
         Путь к сохранённому скриншоту.
     """
     path = screenshot_path(run_dir, step_num, name)
+    bbox = None
     if activate_driver and pid:
         activate_driver.activate_window(pid)
-    take_screenshot(path)
+        try:
+            bbox = activate_driver.get_window_rect(pid)
+        except Exception:
+            bbox = None
+    take_screenshot(path, bbox=bbox)
     return path
 
 
