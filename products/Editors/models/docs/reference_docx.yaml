@@ -8,6 +8,22 @@ smoke_text_assert_tokens:
   - систем массового участия
   - 1234567890
 
+smoke_text_alignment_anchor_tokens:
+  - Задача
+  - Товарищи
+  - Повседневная
+  - 1234567890
+
+smoke_editor_context:
+  toolbar_tokens:
+    - Главная
+    - Вставка
+    - Макет
+  status_tokens:
+    - Страница
+    - Русский
+    - Масштаб
+
 open_tokens:
   - Работа с текстом
   - параграф
@@ -98,3 +114,5 @@ tolerances:
   layout:
     full_view_top_max_ratio: 0.45
     full_view_bottom_min_ratio: 0.55
+    smoke_text_left_max_ratio: 0.19
+    smoke_text_left_anchors_need: 2

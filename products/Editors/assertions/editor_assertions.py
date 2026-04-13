@@ -42,6 +42,16 @@ _REFERENCE_DOC_MODEL = load_yaml_model("products/Editors/models/docs/reference_d
 _EDITORS_RISK_MODEL_PATH = "products/Editors/RISK_MODEL.md"
 
 SMOKE_TEXT_ASSERT_TOKENS = list(_REFERENCE_DOC_MODEL.get("smoke_text_assert_tokens", []))
+SMOKE_TEXT_ALIGNMENT_ANCHOR_TOKENS = list(
+    _REFERENCE_DOC_MODEL.get("smoke_text_alignment_anchor_tokens", [])
+)
+_SMOKE_EDITOR_CONTEXT = dict(_REFERENCE_DOC_MODEL.get("smoke_editor_context", {}) or {})
+SMOKE_EDITOR_CONTEXT_TOOLBAR_TOKENS = list(
+    _SMOKE_EDITOR_CONTEXT.get("toolbar_tokens", ["Главная", "Вставка", "Макет"])
+)
+SMOKE_EDITOR_CONTEXT_STATUS_TOKENS = list(
+    _SMOKE_EDITOR_CONTEXT.get("status_tokens", ["Страница", "Русский", "Масштаб"])
+)
 REFERENCE_DOC_OPEN_TOKENS = list(_REFERENCE_DOC_MODEL.get("open_tokens", []))
 REFERENCE_DOC_PAGE_TOKENS = {
     int(page): list(tokens)
@@ -61,6 +71,12 @@ DEFAULT_FULL_VIEW_TOP_MAX_RATIO = float(
 )
 DEFAULT_FULL_VIEW_BOTTOM_MIN_RATIO = float(
     _REFERENCE_DOC_LAYOUT_TOLERANCES.get("full_view_bottom_min_ratio", 0.55)
+)
+DEFAULT_SMOKE_TEXT_LEFT_MAX_RATIO = float(
+    _REFERENCE_DOC_LAYOUT_TOLERANCES.get("smoke_text_left_max_ratio", 0.12)
+)
+DEFAULT_SMOKE_TEXT_LEFT_ANCHORS_NEED = int(
+    _REFERENCE_DOC_LAYOUT_TOLERANCES.get("smoke_text_left_anchors_need", 2)
 )
 
 
@@ -368,6 +384,38 @@ def assert_left_aligned(
             "max_offset_ratio": max_offset_ratio,
             "screenshot_path": screenshot_path,
         },
+    )
+
+
+def assert_editor_document_context(
+    screenshot_path: str,
+    capture: bool = True,
+) -> VerificationResult:
+    """Проверить, что на скриншоте действительно окно редактора документа."""
+    if capture:
+        take_screenshot(screenshot_path)
+    anchors = [
+        {
+            "name": "editor_toolbar_context",
+            "tokens": list(SMOKE_EDITOR_CONTEXT_TOOLBAR_TOKENS),
+            "region": "toolbar",
+            "required": True,
+            "need": 1,
+        },
+        {
+            "name": "editor_status_context",
+            "tokens": list(SMOKE_EDITOR_CONTEXT_STATUS_TOKENS),
+            "region": "status_bar",
+            "required": True,
+            "need": 1,
+        },
+    ]
+    return verify_visual_anchor_set(
+        screenshot_path=screenshot_path,
+        anchors=anchors,
+        risk_model_path=_EDITORS_RISK_MODEL_PATH,
+        min_feature_confidence=0.6,
+        max_missing_required=0,
     )
 
 
@@ -801,16 +849,20 @@ def assert_text_entered_and_left_aligned(
     tokens: List[str],
     need: int = 2,
     anchor_token: str = "Задача",
-    max_left_ratio: float = 0.35,
+    max_left_ratio: float = DEFAULT_SMOKE_TEXT_LEFT_MAX_RATIO,
+    capture: bool = True,
+    anchor_need: int = DEFAULT_SMOKE_TEXT_LEFT_ANCHORS_NEED,
 ) -> VerificationResult:
-    """Проверить, что текст введён и начало абзаца расположено у левого поля.
+    """Проверить, что текст введён и абзац у левого поля страницы.
 
     Критерий:
     1) В OCR-тексте найдено минимум `need` токенов ожидаемого текста.
-    2) Якорный токен (`anchor_token`) найден на скриншоте и его координата X
-       находится в левой части страницы (<= max_left_ratio * width).
+    2) Подтверждён контекст окна редактора (toolbar + status bar anchors).
+    3) Найдено минимум `anchor_need` якорей в регионе страницы и минимальный
+       offset по X не превышает `max_left_ratio`.
     """
-    take_screenshot(screenshot_path)
+    if capture:
+        take_screenshot(screenshot_path)
     ocr_text = ocr_image(screenshot_path)
     text_ok, found = has_tokens(ocr_text, tokens, need)
     text_result = result_from_token_match(
@@ -824,17 +876,92 @@ def assert_text_entered_and_left_aligned(
     if not text_ok:
         return text_result
 
-    geometry_result = assert_left_aligned(
+    context_result = assert_editor_document_context(
         screenshot_path=screenshot_path,
-        token=anchor_token,
-        reference_region="page",
         capture=False,
-        max_offset_ratio=max_left_ratio,
     )
-    geometry_result.sources_used.insert(0, "semantic_content_model")
-    geometry_result.evidence["found_tokens"] = text_result.found_tokens
+    if not context_result.ok:
+        context_result.evidence["reason"] = "EDITOR_CONTEXT_NOT_CONFIRMED"
+        return merge_results(
+            [text_result, context_result],
+            mode="all",
+            evidence={"tab": "text_entered_left_aligned"},
+        )
+
+    regions = _image_regions(screenshot_path)
+    page_rect = regions["page"]
+
+    raw_candidates = [anchor_token] + list(SMOKE_TEXT_ALIGNMENT_ANCHOR_TOKENS)
+    for matched_token in text_result.found_tokens:
+        token = str(matched_token).strip()
+        if not token:
+            continue
+        raw_candidates.append(token)
+        parts = token.split()
+        if parts:
+            raw_candidates.append(parts[0])
+    candidate_tokens = []
+    for token in raw_candidates:
+        normalized = str(token).strip()
+        if not normalized:
+            continue
+        if normalized not in candidate_tokens:
+            candidate_tokens.append(normalized)
+
+    hits = []
+    for token in candidate_tokens:
+        bbox = find_token_bbox(screenshot_path, token)
+        if not bbox:
+            continue
+        rect = rect_from_bbox(bbox)
+        if not is_contained(rect, page_rect, tolerance_px=2):
+            continue
+        offset_ratio = (rect.left - page_rect.left) / float(max(1, page_rect.width))
+        hits.append(
+            {
+                "token": token,
+                "bbox": bbox,
+                "offset_ratio": offset_ratio,
+            }
+        )
+
+    hits_sorted = sorted(hits, key=lambda item: float(item["offset_ratio"]))
+    usable_hits = hits_sorted[:max(1, int(anchor_need))]
+    min_offset_ratio = float(usable_hits[0]["offset_ratio"]) if usable_hits else None
+    geometry_ok = (
+        len(usable_hits) >= max(1, int(anchor_need))
+        and min_offset_ratio is not None
+        and min_offset_ratio <= float(max_left_ratio)
+    )
+    geometry_result = build_result(
+        ok=geometry_ok,
+        sources_used=["geometry"],
+        signal_strength=(
+            1.0
+            if geometry_ok
+            else (
+                max(0.0, 1.0 - abs((min_offset_ratio or 1.0) - float(max_left_ratio)))
+                if min_offset_ratio is not None
+                else 0.0
+            )
+        ),
+        tolerance_applied=[
+            f"left_offset_ratio<={max_left_ratio}",
+            f"left_anchor_hits>={max(1, int(anchor_need))}",
+        ],
+        evidence={
+            "reference_region": "page",
+            "max_offset_ratio": max_left_ratio,
+            "min_offset_ratio": min_offset_ratio,
+            "anchor_need": max(1, int(anchor_need)),
+            "alignment_candidates": candidate_tokens,
+            "alignment_hits": usable_hits,
+            "screenshot_path": screenshot_path,
+            "found_tokens": text_result.found_tokens,
+        },
+    )
     return merge_results(
-        [text_result, geometry_result],
+        [text_result, context_result, geometry_result],
         mode="all",
         evidence={"tab": "text_entered_left_aligned"},
     )

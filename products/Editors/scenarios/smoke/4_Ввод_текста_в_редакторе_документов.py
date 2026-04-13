@@ -116,26 +116,27 @@ def main():
             )
             return
 
-        shot = capture_step(
-            runner.run_dir,
-            1,
-            "text_input",
-            activate_driver=driver,
-            pid=pid,
-        )
+        shot = ""
 
         last_ok = False
         last_text_result = None
 
         def _probe_text_ready() -> bool:
-            nonlocal last_ok, last_text_result
+            nonlocal last_ok, last_text_result, shot
             driver.activate_window(pid)
+            shot = capture_step(
+                runner.run_dir,
+                1,
+                "text_input",
+                activate_driver=driver,
+                pid=pid,
+            )
             last_text_result = assert_text_entered_and_left_aligned(
                 shot,
                 tokens=SMOKE_TEXT_ASSERT_TOKENS,
                 need=2,
                 anchor_token="Задача",
-                max_left_ratio=0.35,
+                capture=False,
             )
             last_ok = bool(last_text_result)
             return last_ok
