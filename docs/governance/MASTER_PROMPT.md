@@ -341,7 +341,7 @@ Testing/
 
 ## 13. Контрольный чеклист перед сдачей
 
-- [ ] Скрипт запускается `python <script.py>` без ошибок
+- [ ] Скрипт запускается через `.venv\Scripts\python.exe <relative\script.py>` без ошибок
 - [ ] Количество шагов в отчёте = количеству шагов в тест-кейсе
 - [ ] Счётчики PASS/FAIL совпадают с таблицей
 - [ ] Колонка `Факт` — без технических деталей, только пользовательский результат
@@ -358,14 +358,14 @@ Testing/
 
 ```bash
 # 1. Подготовка окружения (один раз):
-python setup_env.py
+python tools/setup_env.py
 
-# 2. Прочитай тест-кейс из Editors/test_cases/smoke/
+# 2. Прочитай тест-кейс из products/Editors/scenarios/smoke/
 
 # 3. Напиши скрипт по правилам из этого промпта
 
 # 4. Запуск (Windows):
-.venv\Scripts\python products\Editors\scenarios\smoke\N_название.py --editor-path "C:\..."
+.venv\Scripts\python.exe products\Editors\scenarios\smoke\N_название.py --editor-path "C:\..."
 
 # 5. Проверь артефакты по чеклисту (раздел 13)
 
@@ -395,6 +395,9 @@ PHASE 1 — CONTEXT LOADING
 Ты обязан загрузить и применить:
 
 - AGENTS.md
+- docs/governance/RULES.md
+- docs/governance/GIT_DISCIPLINE.md
+- docs/governance/TASK_PROMPT.md
 - products/<Продукт>/RISK_MODEL.md
 - products/<Продукт>/DECISION_ENGINE.md
 - docs/methodology/SCRIPT_RULES.md
