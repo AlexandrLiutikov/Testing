@@ -17,30 +17,50 @@
 
 ---
 
+## 0.1. Статус документа и связь с TASK_PROMPT
+
+`MASTER_PROMPT.md` — канонический нормативный документ управления агентом:
+- модель работы;
+- классификация `TEST_FAIL` / `INFRA_FAIL` / `BLOCKED`;
+- алгоритм формирования `RELEASE_DECISION`;
+- фазовый протокол выполнения;
+- обязательный формат ответа.
+
+`TASK_PROMPT.md` используется только как краткий операционный адаптер.
+Он **не может** вводить новые нормы, расширять или переопределять правила из `MASTER_PROMPT.md`.
+
+Если между `TASK_PROMPT.md` и `MASTER_PROMPT.md` есть расхождение, действует `MASTER_PROMPT.md`.
+
+---
+
 ## 1. Обязательное чтение перед работой
 
 Перед выполнением **любой** задачи прочитай файлы в этом порядке:
 
 | # | Файл | Что содержит |
 |---|---|---|
-| 1 | `AGENTS.md` | Философия, приоритеты, формат ответа |
-| 2 | `docs/governance/GIT_DISCIPLINE.md` | Обязательный регламент работы с Git |
-| 3 | `products/<Продукт>/RISK_MODEL.md` | Модель рисков продукта (для Editors → `products/Editors/RISK_MODEL.md`) |
-| 4 | `products/<Продукт>/DECISION_ENGINE.md` | Алгоритм принятия решения о релизе (для Editors → `products/Editors/DECISION_ENGINE.md`) |
-| 5 | `docs/methodology/SCRIPT_RULES.md` | Правила написания Python-скриптов |
-| 6 | `docs/methodology/REPORT_STYLE_RULES.md` | Стандарт оформления HTML/MD/JSON отчётов |
+| 1 | `AGENTS.md` | Точка входа, preflight и рамки выполнения задачи |
+| 2 | `docs/governance/RULES.md` | Миссия и приоритет правил (источник истины верхнего уровня) |
+| 3 | `docs/governance/GIT_DISCIPLINE.md` | Обязательный регламент работы с Git |
+| 4 | `docs/governance/TASK_PROMPT.md` | Операционный адаптер маршрута выполнения (без собственных норм) |
+| 5 | `products/<Продукт>/RISK_MODEL.md` | Модель рисков продукта (для Editors → `products/Editors/RISK_MODEL.md`) |
+| 6 | `products/<Продукт>/DECISION_ENGINE.md` | Алгоритм принятия решения о релизе (для Editors → `products/Editors/DECISION_ENGINE.md`) |
+| 7 | `docs/methodology/SCRIPT_RULES.md` | Правила написания Python-скриптов |
+| 8 | `docs/methodology/REPORT_STYLE_RULES.md` | Стандарт оформления HTML/MD/JSON отчётов |
 
 **Если какой-то файл недоступен** — останови работу, сообщи пользователю, предложи восстановить.
 
 ### Приоритет правил (при конфликте)
 
 1. Явное указание пользователя
-2. `AGENTS.md`
+2. `docs/governance/RULES.md`
 3. `docs/governance/GIT_DISCIPLINE.md`
 4. `<Продукт>/RISK_MODEL.md`
 5. `<Продукт>/DECISION_ENGINE.md`
 6. `docs/methodology/SCRIPT_RULES.md`
 7. `docs/methodology/REPORT_STYLE_RULES.md`
+8. `docs/governance/MASTER_PROMPT.md`
+9. `docs/governance/TASK_PROMPT.md` (операционный адаптер, не переопределяет пункты 1-8)
 
 ---
 
